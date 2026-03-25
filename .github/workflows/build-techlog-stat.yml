@@ -1,0 +1,109 @@
+name: Build and Release techlog-stat
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "docs/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "README.md"
+      - "LICENSE"
+      - ".github/workflows/build-techlog-stat.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            binary_name: techlog-stat
+            archive_name: techlog-stat_linux_amd64.tar.gz
+            package_dir: techlog-stat_linux_amd64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            binary_name: techlog-stat.exe
+            archive_name: techlog-stat_windows_amd64.zip
+            package_dir: techlog-stat_windows_amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o "dist/${{ matrix.binary_name }}" ./cmd/techlog-stat
+
+      - name: Prepare package directory
+        run: |
+          mkdir -p "${{ matrix.package_dir }}"
+          cp "dist/${{ matrix.binary_name }}" "${{ matrix.package_dir }}/"
+          cp README.md "${{ matrix.package_dir }}/"
+          cp LICENSE "${{ matrix.package_dir }}/"
+          cp docs/techlog-stat-v1.md "${{ matrix.package_dir }}/"
+
+      - name: Create Linux archive
+        if: matrix.goos == 'linux'
+        run: tar -czf "${{ matrix.archive_name }}" "${{ matrix.package_dir }}"
+
+      - name: Create Windows archive
+        if: matrix.goos == 'windows'
+        run: tar -a -cf "${{ matrix.archive_name }}" "${{ matrix.package_dir }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true
