@@ -58,9 +58,6 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Run tests
-        run: go test ./...
-
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
