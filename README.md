@@ -1,6 +1,6 @@
 ﻿# techlog-stat
 
-[![Build](https://github.com/OWNER/REPO/actions/workflows/build-techlog-stat.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/build-techlog-stat.yml)
+[![Build](https://github.com/azheval/tech_log/actions/workflows/build-techlog-stat.yml/badge.svg)](https://github.com/azheval/tech_log/actions/workflows/build-techlog-stat.yml)
 
 `techlog-stat` is a standalone Go CLI for reading 1C technological logs and writing aggregate reports to files.
 
