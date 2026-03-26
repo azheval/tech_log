@@ -55,11 +55,14 @@ type fileResult struct {
 }
 
 type parser struct {
-	spec             reportSpec
-	agg              *aggregator
-	current          strings.Builder
-	currentEventName string
-	currentDurMS     float64
+	spec              reportSpec
+	filters           []config.Filter
+	minDurationMicros int64
+	agg               *aggregator
+	current           strings.Builder
+	currentEventName  string
+	currentDurMicros  int64
+	currentDurMS      float64
 }
 
 var (
@@ -110,7 +113,7 @@ func Build(cfg config.Config) (model.ErrorReport, error) {
 	}
 
 	totalAgg := newAggregator()
-	for result := range processFiles(files, workers, spec) {
+	for result := range processFiles(files, workers, spec, cfg.Filters, cfg.MinDurationMicros) {
 		report.Meta.BytesRead += result.result.bytesRead
 		if result.terr != nil {
 			report.Meta.FilesFailed++
@@ -147,7 +150,7 @@ func makeEventSet(names ...string) map[string]struct{} {
 	return out
 }
 
-func processFiles(files []string, workers int, spec reportSpec) <-chan fileResult {
+func processFiles(files []string, workers int, spec reportSpec, filters []config.Filter, minDurationMicros int64) <-chan fileResult {
 	jobs := make(chan string)
 	results := make(chan fileResult, workers)
 
@@ -157,7 +160,7 @@ func processFiles(files []string, workers int, spec reportSpec) <-chan fileResul
 		go func() {
 			defer wg.Done()
 			for file := range jobs {
-				result, err := processFile(file, spec)
+				result, err := processFile(file, spec, filters, minDurationMicros)
 				results <- fileResult{file: file, result: result, terr: err}
 			}
 		}()
@@ -175,7 +178,7 @@ func processFiles(files []string, workers int, spec reportSpec) <-chan fileResul
 	return results
 }
 
-func processFile(path string, spec reportSpec) (parseResult, error) {
+func processFile(path string, spec reportSpec, filters []config.Filter, minDurationMicros int64) (parseResult, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return parseResult{}, err
@@ -184,7 +187,7 @@ func processFile(path string, spec reportSpec) (parseResult, error) {
 
 	reader := bufio.NewReaderSize(file, 4*1024*1024)
 	agg := newAggregator()
-	p := parser{spec: spec, agg: &agg}
+	p := parser{spec: spec, filters: filters, minDurationMicros: minDurationMicros, agg: &agg}
 	var bytesRead int64
 
 	for {
@@ -231,11 +234,12 @@ func (p *parser) consumeLine(raw []byte) {
 
 	if isEventStart(line) {
 		p.finishEvent()
-		eventName, durMS, ok := parseEventHeader(line)
+		eventName, durMicros, durMS, ok := parseEventHeader(line)
 		if !ok {
 			return
 		}
 		p.currentEventName = eventName
+		p.currentDurMicros = durMicros
 		p.currentDurMS = durMS
 		p.current.WriteString(line)
 		return
@@ -253,12 +257,14 @@ func (p *parser) consumeLine(raw []byte) {
 func (p *parser) finishEvent() {
 	if p.currentEventName == "" {
 		p.current.Reset()
+		p.currentDurMicros = 0
 		p.currentDurMS = 0
 		return
 	}
 
-	if p.spec.matchesEvent(p.currentEventName) {
-		descr := extractDescription(p.current.String())
+	eventText := p.current.String()
+	if p.spec.matchesEvent(p.currentEventName) && p.matchesEventFilters(eventText, p.currentDurMicros) {
+		descr := extractDescription(eventText)
 		if descr != "" {
 			p.agg.add(p.currentEventName, descr, p.currentDurMS)
 		}
@@ -266,7 +272,15 @@ func (p *parser) finishEvent() {
 
 	p.current.Reset()
 	p.currentEventName = ""
+	p.currentDurMicros = 0
 	p.currentDurMS = 0
+}
+
+func (p *parser) matchesEventFilters(event string, durMicros int64) bool {
+	if durMicros < p.minDurationMicros {
+		return false
+	}
+	return config.MatchAllFilters(event, p.filters)
 }
 
 func (s reportSpec) matchesEvent(name string) bool {
@@ -374,26 +388,26 @@ func isEventStart(line string) bool {
 	return isDigit(line[0]) && isDigit(line[1]) && line[2] == ':' && isDigit(line[3]) && isDigit(line[4]) && line[5] == '.'
 }
 
-func parseEventHeader(line string) (string, float64, bool) {
+func parseEventHeader(line string) (string, int64, float64, bool) {
 	comma1 := strings.IndexByte(line, ',')
 	if comma1 <= 0 {
-		return "", 0, false
+		return "", 0, 0, false
 	}
 	prefix := line[:comma1]
 	minus := strings.LastIndexByte(prefix, '-')
 	if minus <= 0 || minus+1 >= len(prefix) {
-		return "", 0, false
+		return "", 0, 0, false
 	}
-	dur, err := strconv.ParseFloat(prefix[minus+1:], 64)
+	durMicros, err := strconv.ParseInt(prefix[minus+1:], 10, 64)
 	if err != nil {
-		return "", 0, false
+		return "", 0, 0, false
 	}
 	rest := line[comma1+1:]
 	comma2 := strings.IndexByte(rest, ',')
 	if comma2 <= 0 {
-		return "", 0, false
+		return "", 0, 0, false
 	}
-	return rest[:comma2], dur / 1000.0, true
+	return rest[:comma2], durMicros, float64(durMicros) / 1000.0, true
 }
 
 func extractDescription(event string) string {

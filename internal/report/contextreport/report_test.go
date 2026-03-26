@@ -60,6 +60,38 @@ func TestBuildMergesMultipleFilesByContext(t *testing.T) {
 	}
 }
 
+func TestBuildSDBLContextAppliesRawFilters(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "procA_123", "26032306.log"), ""+
+		"56:15.431019-3000,SDBL,1,process=1CV8C,Usr=DefUser,DataBase=conf_null,Context=Ctx.Accepted\n"+
+		"56:15.431020-2000,SDBL,1,process=1CV8C,Usr=OtherUser,DataBase=conf_null,Context=Ctx.RejectedByUser\n"+
+		"56:15.431021-1000,SDBL,1,process=1CV8C,Usr=DefUser,Context=Ctx.MissingDb\n")
+
+	cfg := config.Config{
+		Report:    config.ReportSDBLContext,
+		InputRoot: root,
+		Glob:      "*/*.log",
+		OutputDir: filepath.Join(root, "out"),
+		Formats:   []string{"json"},
+		Filters: []config.Filter{
+			{Key: "Usr", Value: "DefUser"},
+			{Key: "DataBase", Value: "conf_null"},
+		},
+		TopN:    10,
+		Workers: 1,
+	}
+	report, err := Build(cfg)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.Totals.EventCount != 1 {
+		t.Fatalf("EventCount = %d, want 1", report.Totals.EventCount)
+	}
+	if len(report.Rows) != 1 || report.Rows[0].Context != "Ctx.Accepted" {
+		t.Fatalf("unexpected rows: %+v", report.Rows)
+	}
+}
+
 func TestBuildCALLContextUsesFollowingContextEvent(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "procA_123", "26032306.log"), ""+

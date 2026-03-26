@@ -4,7 +4,19 @@
 
 `techlog-stat` is a standalone Go CLI for reading 1C technological logs and writing aggregate reports to files.
 
-## Current reports
+## Languages
+
+- English: `README.md`
+- Belarusian: [README.be.md](c:/ws/tech_log/go/techlog-stat/README.be.md)
+- Russian: [README.ru.md](c:/ws/tech_log/go/techlog-stat/README.ru.md)
+
+## Version Documentation
+
+- Detailed v1 specification in English: [docs/techlog-stat-v1.en.md](c:/ws/tech_log/go/techlog-stat/docs/techlog-stat-v1.en.md)
+- Belarusian translation: [docs/techlog-stat-v1.be.md](c:/ws/tech_log/go/techlog-stat/docs/techlog-stat-v1.be.md)
+- Russian translation: [docs/techlog-stat-v1.ru.md](c:/ws/tech_log/go/techlog-stat/docs/techlog-stat-v1.ru.md)
+
+## Current Reports
 
 Supported reports:
 
@@ -33,7 +45,7 @@ Error reports:
 ## Example
 
 ```bash
-./techlog-stat.exe call-context --input C:/v8/logs --glob "rphost_*/*.log" --output C:/reports/call_2026-03-24 --top 10 --workers 10 --format text
+./techlog-stat.exe call-context --input C:/v8/logs --glob "rphost_*/*.log" --output C:/reports/call_2026-03-24 --top 10 --workers 10 --format text --filter Usr=DefUser --filter DataBase=conf_null --duration 1s
 ```
 
 ## Notes

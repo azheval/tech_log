@@ -19,13 +19,15 @@ const (
 )
 
 type Config struct {
-	Report    string
-	InputRoot string
-	Glob      string
-	OutputDir string
-	Formats   []string
-	TopN      int
-	Workers   int
+	Report            string
+	InputRoot         string
+	Glob              string
+	OutputDir         string
+	Formats           []string
+	Filters           []Filter
+	MinDurationMicros int64
+	TopN              int
+	Workers           int
 }
 
 func NormalizeReport(report string) string {
@@ -66,6 +68,14 @@ func (c Config) Validate() error {
 	}
 	if len(c.Formats) == 0 {
 		return fmt.Errorf("--format must contain at least one value")
+	}
+	for _, filter := range c.Filters {
+		if filter.Key == "" {
+			return fmt.Errorf("--filter key must not be empty")
+		}
+	}
+	if c.MinDurationMicros < 0 {
+		return fmt.Errorf("--duration must not be negative")
 	}
 	return nil
 }

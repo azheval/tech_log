@@ -8,6 +8,17 @@ import (
 	"techlog-stat/internal/config"
 )
 
+type filterFlags []string
+
+func (f *filterFlags) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *filterFlags) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 func Parse(args []string) (config.Config, error) {
 	var cfg config.Config
 	if len(args) == 0 {
@@ -24,12 +35,28 @@ func Parse(args []string) (config.Config, error) {
 	formats := fs.String("format", "text,csv,json", "comma-separated output formats")
 	fs.IntVar(&cfg.TopN, "top", 100, "number of ranked rows to write")
 	fs.IntVar(&cfg.Workers, "workers", 1, "file-level parallelism")
+	duration := fs.String("duration", "", "minimum event duration filter; bare number means seconds, examples: 5, 5s, 500ms")
+
+	var rawFilters filterFlags
+	fs.Var(&rawFilters, "filter", "raw event filter in key=value form; can be passed multiple times")
 
 	if err := fs.Parse(args[1:]); err != nil {
 		return cfg, err
 	}
 
 	cfg.Formats = splitList(*formats)
+	for _, raw := range rawFilters {
+		filter, err := config.ParseFilter(raw)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Filters = append(cfg.Filters, filter)
+	}
+	minDurationMicros, err := config.ParseMinDurationMicros(*duration)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.MinDurationMicros = minDurationMicros
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
 	}
