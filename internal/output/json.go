@@ -13,3 +13,11 @@ func RenderRunJSON(report model.ContextReport) ([]byte, error) {
 func RenderErrorRunJSON(report model.ErrorReport) ([]byte, error) {
 	return json.MarshalIndent(report, "", "  ")
 }
+
+func RenderRawContextJSON(report model.RawContextReport) ([]byte, error) {
+	return json.MarshalIndent(report, "", "  ")
+}
+
+func RenderRawErrorJSON(report model.RawErrorReport) ([]byte, error) {
+	return json.MarshalIndent(report, "", "  ")
+}

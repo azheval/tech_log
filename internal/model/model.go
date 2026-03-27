@@ -64,3 +64,59 @@ type ErrorReport struct {
 	Errors  []string   `json:"errors,omitempty"`
 	Matches []string   `json:"matches,omitempty"`
 }
+
+type RawContextEvent struct {
+	Timestamp      time.Time `json:"timestamp"`
+	HourBucket     time.Time `json:"hour_bucket"`
+	Event          string    `json:"event"`
+	File           string    `json:"file"`
+	DurationMicros int64     `json:"duration_micros"`
+	DurationMS     float64   `json:"duration_ms"`
+	Context        string    `json:"context"`
+	ShortContext   string    `json:"short_context"`
+}
+
+type RawContextHour struct {
+	Hour   time.Time         `json:"hour"`
+	Events []RawContextEvent `json:"events"`
+}
+
+type RawContextDay struct {
+	Date  string           `json:"date"`
+	Hours []RawContextHour `json:"hours"`
+}
+
+type RawContextReport struct {
+	Meta    RunMeta         `json:"meta"`
+	Days    []RawContextDay `json:"days"`
+	Errors  []string        `json:"errors,omitempty"`
+	Matches []string        `json:"matches,omitempty"`
+}
+
+type RawErrorEvent struct {
+	Timestamp        time.Time `json:"timestamp"`
+	HourBucket       time.Time `json:"hour_bucket"`
+	Event            string    `json:"event"`
+	File             string    `json:"file"`
+	DurationMicros   int64     `json:"duration_micros"`
+	DurationMS       float64   `json:"duration_ms"`
+	Description      string    `json:"description"`
+	ShortDescription string    `json:"short_description"`
+}
+
+type RawErrorHour struct {
+	Hour   time.Time       `json:"hour"`
+	Events []RawErrorEvent `json:"events"`
+}
+
+type RawErrorDay struct {
+	Date  string         `json:"date"`
+	Hours []RawErrorHour `json:"hours"`
+}
+
+type RawErrorReport struct {
+	Meta    RunMeta       `json:"meta"`
+	Days    []RawErrorDay `json:"days"`
+	Errors  []string      `json:"errors,omitempty"`
+	Matches []string      `json:"matches,omitempty"`
+}

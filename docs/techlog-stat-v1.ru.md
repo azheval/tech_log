@@ -3,7 +3,7 @@
 ## Контракт CLI
 
 ```text
-techlog-stat <report> --input <dir> --glob <pattern> --output <dir> [--top N] [--format list] [--workers N] [--filter key=value] [--duration value]
+techlog-stat <report> --input <dir> --glob <pattern> --output <dir> [--mode aggregate|raw] [--top N] [--format list] [--workers N] [--filter key=value] [--duration value] [--date-from YYYY-MM-DD] [--date-to YYYY-MM-DD] [--time-from HH:MM[:SS]] [--time-to HH:MM[:SS]]
 ```
 
 ## Флаги
@@ -17,8 +17,14 @@ techlog-stat <report> --input <dir> --glob <pattern> --output <dir> [--top N] [-
   Рекурсивный `**` не поддерживается.
 - `--output`
   Каталог результата одного запуска.
+- `--mode`
+  Режим вывода.
+  Поддерживаемые значения:
+  - `aggregate` для ранжированной групповой статистики.
+  - `raw` для наиболее длительных событий за час без агрегирования.
 - `--top`
   Максимальное число строк в ранжированном выводе, по умолчанию `100`.
+  В необработанном режиме значение применяется отдельно к каждому часовому интервалу.
 - `--format`
   Форматы через запятую: `text`, `csv`, `json`.
 - `--workers`
@@ -30,14 +36,24 @@ techlog-stat <report> --input <dir> --glob <pattern> --output <dir> [--top N] [-
   Отсутствующее поле не вызывает ошибку, но событие не совпадает.
 - `--duration`
   Минимальный порог длительности исходного события.
-  Фильтр применяется до агрегации.
+  Фильтр применяется перед агрегированием или ранжированием исходных данных.
   1С хранит длительность в микросекундах, но CLI принимает удобный порог.
   Голое число трактуется как секунды: `--duration 5` эквивалентно `5s`.
   Поддерживаются суффиксы `us`, `ms`, `s`, `m`.
+- `--date-from`
+  Нижняя граница даты включительно в формате `YYYY-MM-DD`.
+- `--date-to`
+  Верхняя граница даты включительно в формате `YYYY-MM-DD`.
+- `--time-from`
+  Нижняя граница времени суток в формате `HH:MM` или `HH:MM:SS`.
+- `--time-to`
+  Верхняя граница времени суток в формате `HH:MM` или `HH:MM:SS`.
 
 ## Контракт Выходных Файлов
 
-Каждый запуск создает отдельный каталог результата:
+При каждом запуске создается отдельный выходной каталог.
+
+Режим агрегирования:
 
 ```text
 <output>/
@@ -47,7 +63,19 @@ techlog-stat <report> --input <dir> --glob <pattern> --output <dir> [--top N] [-
   errors.log
 ```
 
-## summary.txt
+Необработанный режим:
+
+```текст
+<вывод>/
+raw.txt
+raw.csv
+raw.json
+errors.log
+```
+
+## Сводные данные
+
+`summary.txt` содержит:
 
 Человекочитаемый отчет содержит:
 
@@ -74,9 +102,40 @@ rank,context,short_context,total_duration_ms,time_pct,count,count_pct,avg_durati
 rank,event,description,short_description,total_duration_ms,time_pct,count,count_pct,avg_duration_ms
 ```
 
+## Исходный вывод
+
+В исходном выводе сохраняются отфильтрованные отдельные события, которые сортируются по убыванию исходной продолжительности.
+
+Поведение:
+
+- события группируются по дням
+- внутри каждого дня события группируются по часам
+- `top N` рассчитывается независимо для каждого часа
+- метки времени восстанавливаются из часа файла журнала и времени строки события внутри файла
+- отчеты о контексте сохраняют как `context`, так и `short_context`
+- отчеты об ошибках сохраняют как `description`, так и `short_description`
+
+`raw.csv` для отчетов о контексте:
+
+```text
+date,hour,timestamp,event,file,duration_micros,duration_ms,context,short_context
+```
+
+`raw.csv` для отчетов об ошибках:
+
+```text
+date,hour,timestamp,event,file,duration_micros,duration_ms,description,short_description
+```
+
+`raw.json` содержит те же данные, сгруппированные следующим образом:
+
+- дни
+- часы в течение дня
+- необработанные события в течение часа
+
 ## run.json
 
-Метаданные выполнения включают:
+В состав агрегированного JSON входят:
 
 - версию утилиты
 - тип отчета
@@ -86,6 +145,9 @@ rank,event,description,short_description,total_duration_ms,time_pct,count,count_
 - счетчики файлов
 - объем прочитанных данных
 - выбранные параметры
+- строки с ранжированием
+
+Необработанный JSON включает те же метаданные запуска, а также сгруппированные необработанные события.
 
 ## errors.log
 

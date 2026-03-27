@@ -84,6 +84,92 @@ func RenderErrorRowsCSV(report model.ErrorReport) ([]byte, error) {
 	return withUTF8BOM(buf.Bytes()), writer.Error()
 }
 
+func RenderRawContextsCSV(report model.RawContextReport) ([]byte, error) {
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+
+	if err := writer.Write([]string{
+		"date",
+		"hour",
+		"timestamp",
+		"event",
+		"file",
+		"duration_micros",
+		"duration_ms",
+		"context",
+		"short_context",
+	}); err != nil {
+		return nil, err
+	}
+
+	for _, day := range report.Days {
+		for _, hour := range day.Hours {
+			for _, event := range hour.Events {
+				record := []string{
+					day.Date,
+					hour.Hour.Format("15:00"),
+					event.Timestamp.Format("2006-01-02 15:04:05.000000"),
+					event.Event,
+					event.File,
+					strconv.FormatInt(event.DurationMicros, 10),
+					formatHumanFloat(event.DurationMS),
+					event.Context,
+					event.ShortContext,
+				}
+				if err := writer.Write(record); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	writer.Flush()
+	return withUTF8BOM(buf.Bytes()), writer.Error()
+}
+
+func RenderRawErrorsCSV(report model.RawErrorReport) ([]byte, error) {
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+
+	if err := writer.Write([]string{
+		"date",
+		"hour",
+		"timestamp",
+		"event",
+		"file",
+		"duration_micros",
+		"duration_ms",
+		"description",
+		"short_description",
+	}); err != nil {
+		return nil, err
+	}
+
+	for _, day := range report.Days {
+		for _, hour := range day.Hours {
+			for _, event := range hour.Events {
+				record := []string{
+					day.Date,
+					hour.Hour.Format("15:00"),
+					event.Timestamp.Format("2006-01-02 15:04:05.000000"),
+					event.Event,
+					event.File,
+					strconv.FormatInt(event.DurationMicros, 10),
+					formatHumanFloat(event.DurationMS),
+					event.Description,
+					event.ShortDescription,
+				}
+				if err := writer.Write(record); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	writer.Flush()
+	return withUTF8BOM(buf.Bytes()), writer.Error()
+}
+
 func formatHumanFloat(v float64) string {
 	switch {
 	case v >= 1:

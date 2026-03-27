@@ -26,16 +26,22 @@ func Parse(args []string) (config.Config, error) {
 	}
 
 	cfg.Report = config.NormalizeReport(args[0])
+	cfg.Mode = config.ModeAggregate
 
 	fs := flag.NewFlagSet(cfg.Report, flag.ContinueOnError)
 	fs.StringVar(&cfg.InputRoot, "input", "", "root directory with logs")
 	fs.StringVar(&cfg.Glob, "glob", "*/*.log", "file mask relative to input root; use / as separator, for example */*.log or rphost_*/*.*")
 	fs.StringVar(&cfg.OutputDir, "output", "", "output directory for report files")
+	fs.StringVar(&cfg.Mode, "mode", config.ModeAggregate, "output mode: aggregate or raw")
 
 	formats := fs.String("format", "text,csv,json", "comma-separated output formats")
 	fs.IntVar(&cfg.TopN, "top", 100, "number of ranked rows to write")
 	fs.IntVar(&cfg.Workers, "workers", 1, "file-level parallelism")
 	duration := fs.String("duration", "", "minimum event duration filter; bare number means seconds, examples: 5, 5s, 500ms")
+	dateFrom := fs.String("date-from", "", "inclusive date filter in YYYY-MM-DD")
+	dateTo := fs.String("date-to", "", "inclusive date filter in YYYY-MM-DD")
+	timeFrom := fs.String("time-from", "", "time-of-day filter from HH:MM or HH:MM:SS")
+	timeTo := fs.String("time-to", "", "time-of-day filter to HH:MM or HH:MM:SS")
 
 	var rawFilters filterFlags
 	fs.Var(&rawFilters, "filter", "raw event filter in key=value form; can be passed multiple times")
@@ -44,6 +50,7 @@ func Parse(args []string) (config.Config, error) {
 		return cfg, err
 	}
 
+	cfg.Mode = config.NormalizeMode(cfg.Mode)
 	cfg.Formats = splitList(*formats)
 	for _, raw := range rawFilters {
 		filter, err := config.ParseFilter(raw)
@@ -57,6 +64,22 @@ func Parse(args []string) (config.Config, error) {
 		return cfg, err
 	}
 	cfg.MinDurationMicros = minDurationMicros
+	cfg.TimeRange.DateFrom, cfg.TimeRange.HasDateFrom, err = config.ParseDate(*dateFrom)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.TimeRange.DateTo, cfg.TimeRange.HasDateTo, err = config.ParseDate(*dateTo)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.TimeRange.TimeFrom, cfg.TimeRange.HasTimeFrom, err = config.ParseTimeOfDay(*timeFrom)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.TimeRange.TimeTo, cfg.TimeRange.HasTimeTo, err = config.ParseTimeOfDay(*timeTo)
+	if err != nil {
+		return cfg, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
 	}

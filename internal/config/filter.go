@@ -42,6 +42,33 @@ func ParseMinDurationMicros(raw string) (int64, error) {
 	return d.Microseconds(), nil
 }
 
+func ParseDate(raw string) (time.Time, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false, nil
+	}
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("invalid date %q, expected YYYY-MM-DD", raw)
+	}
+	return t, true, nil
+}
+
+func ParseTimeOfDay(raw string) (time.Duration, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false, nil
+	}
+	formats := []string{"15:04", "15:04:05", "15:04:05.000000"}
+	for _, format := range formats {
+		if t, err := time.Parse(format, raw); err == nil {
+			d := time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute + time.Duration(t.Second())*time.Second + time.Duration(t.Nanosecond())
+			return d, true, nil
+		}
+	}
+	return 0, false, fmt.Errorf("invalid time %q, expected HH:MM or HH:MM:SS", raw)
+}
+
 func MatchAllFilters(event string, filters []Filter) bool {
 	for _, filter := range filters {
 		value, ok := ExtractFieldValue(event, filter.Key)

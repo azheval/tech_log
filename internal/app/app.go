@@ -18,12 +18,26 @@ func Run(cfg config.Config) error {
 
 	switch cfg.Report {
 	case config.ReportSDBLContext, config.ReportCALLContext, config.ReportDBMSSQLContext, config.ReportPostgresContext, config.ReportFileDBContext, config.ReportLockContext, config.ReportTimeoutContext, config.ReportDeadlockContext:
+		if cfg.Mode == config.ModeRaw {
+			report, err := contextreport.BuildRaw(cfg)
+			if err != nil {
+				return err
+			}
+			return writeRawContextReport(cfg, report)
+		}
 		report, err := contextreport.Build(cfg)
 		if err != nil {
 			return err
 		}
 		return writeContextReport(cfg, report)
 	case config.ReportErrorDescr:
+		if cfg.Mode == config.ModeRaw {
+			report, err := errorreport.BuildRaw(cfg)
+			if err != nil {
+				return err
+			}
+			return writeRawErrorReport(cfg, report)
+		}
 		report, err := errorreport.Build(cfg)
 		if err != nil {
 			return err
@@ -85,6 +99,66 @@ func writeErrorReport(cfg config.Config, report model.ErrorReport) error {
 			return err
 		}
 		if err := output.WriteFile(filepath.Join(cfg.OutputDir, "run.json"), data); err != nil {
+			return err
+		}
+	}
+	if err := output.WriteFile(filepath.Join(cfg.OutputDir, "errors.log"), output.RenderErrors(report.Errors)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeRawContextReport(cfg config.Config, report model.RawContextReport) error {
+	if contains(cfg.Formats, "text") {
+		if err := output.WriteFile(filepath.Join(cfg.OutputDir, "raw.txt"), output.RenderRawContextText(report)); err != nil {
+			return err
+		}
+	}
+	if contains(cfg.Formats, "csv") {
+		data, err := output.RenderRawContextsCSV(report)
+		if err != nil {
+			return err
+		}
+		if err := output.WriteFile(filepath.Join(cfg.OutputDir, "raw.csv"), data); err != nil {
+			return err
+		}
+	}
+	if contains(cfg.Formats, "json") {
+		data, err := output.RenderRawContextJSON(report)
+		if err != nil {
+			return err
+		}
+		if err := output.WriteFile(filepath.Join(cfg.OutputDir, "raw.json"), data); err != nil {
+			return err
+		}
+	}
+	if err := output.WriteFile(filepath.Join(cfg.OutputDir, "errors.log"), output.RenderErrors(report.Errors)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeRawErrorReport(cfg config.Config, report model.RawErrorReport) error {
+	if contains(cfg.Formats, "text") {
+		if err := output.WriteFile(filepath.Join(cfg.OutputDir, "raw.txt"), output.RenderRawErrorText(report)); err != nil {
+			return err
+		}
+	}
+	if contains(cfg.Formats, "csv") {
+		data, err := output.RenderRawErrorsCSV(report)
+		if err != nil {
+			return err
+		}
+		if err := output.WriteFile(filepath.Join(cfg.OutputDir, "raw.csv"), data); err != nil {
+			return err
+		}
+	}
+	if contains(cfg.Formats, "json") {
+		data, err := output.RenderRawErrorJSON(report)
+		if err != nil {
+			return err
+		}
+		if err := output.WriteFile(filepath.Join(cfg.OutputDir, "raw.json"), data); err != nil {
 			return err
 		}
 	}

@@ -71,3 +71,69 @@ func RenderErrorSummary(report model.ErrorReport) []byte {
 
 	return withUTF8BOM(buf.Bytes())
 }
+
+func RenderRawContextText(report model.RawContextReport) []byte {
+	var buf bytes.Buffer
+
+	fmt.Fprintf(&buf, "Report: %s (Raw)\n", reportTitle(report.Meta.Report))
+	fmt.Fprintf(&buf, "GeneratedAt: %s\n", report.Meta.FinishedAt.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(&buf, "InputRoot: %s\n", report.Meta.InputRoot)
+	fmt.Fprintf(&buf, "Glob: %s\n", report.Meta.Glob)
+	fmt.Fprintf(&buf, "FilesMatched: %d\n", report.Meta.FilesMatched)
+	fmt.Fprintf(&buf, "FilesProcessed: %d\n", report.Meta.FilesProcessed)
+	fmt.Fprintf(&buf, "FilesFailed: %d\n", report.Meta.FilesFailed)
+	fmt.Fprintf(&buf, "Workers: %d\n", report.Meta.Workers)
+	fmt.Fprintf(&buf, "TopPerHour: %d\n\n", report.Meta.TopN)
+
+	for _, day := range report.Days {
+		fmt.Fprintf(&buf, "Date: %s\n", day.Date)
+		for _, hour := range day.Hours {
+			fmt.Fprintf(&buf, "Hour: %s\n", hour.Hour.Format("15:00"))
+			for idx, event := range hour.Events {
+				fmt.Fprintf(&buf, "%d. Timestamp=%s\n", idx+1, event.Timestamp.Format("2006-01-02 15:04:05.000000"))
+				fmt.Fprintf(&buf, "   Event=%s\n", event.Event)
+				fmt.Fprintf(&buf, "   File=%s\n", event.File)
+				fmt.Fprintf(&buf, "   DurationMicros=%d\n", event.DurationMicros)
+				fmt.Fprintf(&buf, "   DurationMs=%s\n", formatHumanFloat(event.DurationMS))
+				fmt.Fprintf(&buf, "   Context=%s\n", event.Context)
+				fmt.Fprintf(&buf, "   ShortContext=%s\n", event.ShortContext)
+			}
+			fmt.Fprintf(&buf, "\n")
+		}
+	}
+
+	return withUTF8BOM(buf.Bytes())
+}
+
+func RenderRawErrorText(report model.RawErrorReport) []byte {
+	var buf bytes.Buffer
+
+	fmt.Fprintf(&buf, "Report: %s (Raw)\n", reportTitle(report.Meta.Report))
+	fmt.Fprintf(&buf, "GeneratedAt: %s\n", report.Meta.FinishedAt.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(&buf, "InputRoot: %s\n", report.Meta.InputRoot)
+	fmt.Fprintf(&buf, "Glob: %s\n", report.Meta.Glob)
+	fmt.Fprintf(&buf, "FilesMatched: %d\n", report.Meta.FilesMatched)
+	fmt.Fprintf(&buf, "FilesProcessed: %d\n", report.Meta.FilesProcessed)
+	fmt.Fprintf(&buf, "FilesFailed: %d\n", report.Meta.FilesFailed)
+	fmt.Fprintf(&buf, "Workers: %d\n", report.Meta.Workers)
+	fmt.Fprintf(&buf, "TopPerHour: %d\n\n", report.Meta.TopN)
+
+	for _, day := range report.Days {
+		fmt.Fprintf(&buf, "Date: %s\n", day.Date)
+		for _, hour := range day.Hours {
+			fmt.Fprintf(&buf, "Hour: %s\n", hour.Hour.Format("15:00"))
+			for idx, event := range hour.Events {
+				fmt.Fprintf(&buf, "%d. Timestamp=%s\n", idx+1, event.Timestamp.Format("2006-01-02 15:04:05.000000"))
+				fmt.Fprintf(&buf, "   Event=%s\n", event.Event)
+				fmt.Fprintf(&buf, "   File=%s\n", event.File)
+				fmt.Fprintf(&buf, "   DurationMicros=%d\n", event.DurationMicros)
+				fmt.Fprintf(&buf, "   DurationMs=%s\n", formatHumanFloat(event.DurationMS))
+				fmt.Fprintf(&buf, "   Description=%s\n", event.Description)
+				fmt.Fprintf(&buf, "   ShortDescription=%s\n", event.ShortDescription)
+			}
+			fmt.Fprintf(&buf, "\n")
+		}
+	}
+
+	return withUTF8BOM(buf.Bytes())
+}

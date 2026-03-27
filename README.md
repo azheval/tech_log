@@ -2,19 +2,19 @@
 
 [![Build](https://github.com/azheval/tech_log/actions/workflows/build-techlog-stat.yml/badge.svg)](https://github.com/azheval/tech_log/actions/workflows/build-techlog-stat.yml)
 
-`techlog-stat` is a standalone Go CLI for reading 1C technological logs and writing aggregate reports to files.
+`techlog-stat` is a standalone Go CLI for reading 1C technological logs and writing reports to files.
 
 ## Languages
 
 - English: `README.md`
-- Belarusian: [README.be.md](c:/ws/tech_log/go/techlog-stat/README.be.md)
-- Russian: [README.ru.md](c:/ws/tech_log/go/techlog-stat/README.ru.md)
+- Belarusian: [README.be.md](/README.be.md)
+- Russian: [README.ru.md](/README.ru.md)
 
 ## Version Documentation
 
-- Detailed v1 specification in English: [docs/techlog-stat-v1.en.md](c:/ws/tech_log/go/techlog-stat/docs/techlog-stat-v1.en.md)
-- Belarusian translation: [docs/techlog-stat-v1.be.md](c:/ws/tech_log/go/techlog-stat/docs/techlog-stat-v1.be.md)
-- Russian translation: [docs/techlog-stat-v1.ru.md](c:/ws/tech_log/go/techlog-stat/docs/techlog-stat-v1.ru.md)
+- Detailed v1 specification in English: [docs/techlog-stat-v1.en.md](/docs/techlog-stat-v1.en.md)
+- Belarusian translation: [docs/techlog-stat-v1.be.md](/docs/techlog-stat-v1.be.md)
+- Russian translation: [docs/techlog-stat-v1.ru.md](/docs/techlog-stat-v1.ru.md)
 
 ## Current Reports
 
@@ -30,22 +30,44 @@ Supported reports:
 - `deadlock-context`
 - `error-descr` or `excp-descr`
 
-Context reports:
+## Output Modes
 
-- read `*.log` files directly
-- aggregate duration and count by `Context`
-- write `summary.txt`, `contexts.csv`, `run.json`, `errors.log`
+Aggregate mode is the default:
 
-Error reports:
+- context reports write `summary.txt`, `contexts.csv`, `run.json`, `errors.log`
+- error reports write `summary.txt`, `errors.csv`, `run.json`, `errors.log`
 
-- read `*.log` files directly
-- aggregate `EXCP` and `QERR` by normalized `Descr`
-- write `summary.txt`, `errors.csv`, `run.json`, `errors.log`
+Raw mode is enabled with `--mode raw`:
 
-## Example
+- keeps all current raw-event filters
+- writes top N individual events per hour
+- groups output by day and hour
+- writes `raw.txt`, `raw.csv`, `raw.json`, `errors.log`
+
+## Filters
+
+Supported filters apply before aggregation or raw ranking:
+
+- `--glob`
+- `--filter key=value`
+- `--duration`
+- `--date-from YYYY-MM-DD`
+- `--date-to YYYY-MM-DD`
+- `--time-from HH:MM[:SS]`
+- `--time-to HH:MM[:SS]`
+
+## Examples
+
+Aggregate report:
 
 ```bash
 ./techlog-stat.exe call-context --input C:/v8/logs --glob "rphost_*/*.log" --output C:/reports/call_2026-03-24 --top 10 --workers 10 --format text --filter Usr=DefUser --filter DataBase=conf_null --duration 1s
+```
+
+Raw top events per hour:
+
+```bash
+./techlog-stat.exe call-context --mode raw --input C:/v8/logs --glob "rphost_*/*.log" --output C:/reports/call_raw_2026-03-24 --top 10 --filter Usr=DefUser --filter DataBase=conf_null --duration 5 --date-from 2026-03-24 --date-to 2026-03-24 --time-from 09:00 --time-to 18:00
 ```
 
 ## Notes
