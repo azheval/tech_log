@@ -1,7 +1,11 @@
-﻿package config
+package config
 
 import (
 	"fmt"
+	"math"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,23 +23,34 @@ const (
 	ReportDBV8DBEngContext = "dbv8dbeng-context"
 	ReportLocksContext     = "locks-context"
 	ReportEXCPDescr        = "excp-descr"
+	ReportAnalyze          = "analyze"
+	ReportCompare          = "compare"
+	ReportServe            = "serve"
 
 	ModeAggregate = "aggregate"
 	ModeRaw       = "raw"
 )
 
 type Config struct {
-	Report            string
-	Mode              string
-	InputRoot         string
-	Glob              string
-	OutputDir         string
-	Formats           []string
-	Filters           []Filter
-	MinDurationMicros int64
-	TimeRange         TimeRange
-	TopN              int
-	Workers           int
+	Report             string
+	Mode               string
+	InputRoot          string
+	Glob               string
+	OutputDir          string
+	Formats            []string
+	Filters            []Filter
+	MinDurationMicros  int64
+	BucketInterval     time.Duration
+	TimeRange          TimeRange
+	TopN               int
+	Workers            int
+	BaselinePath       string
+	CurrentPath        string
+	ThresholdPercent   float64
+	ThresholdAbsMicros float64
+	Listen             string
+	MaxRuns            int
+	MaxConcurrentRuns  int
 }
 
 func NormalizeReport(report string) string {
@@ -66,7 +81,7 @@ func NormalizeMode(mode string) string {
 
 func (c Config) Validate() error {
 	switch c.Report {
-	case ReportSDBLContext, ReportCALLContext, ReportDBMSSQLContext, ReportPostgresContext, ReportFileDBContext, ReportLockContext, ReportTimeoutContext, ReportDeadlockContext, ReportErrorDescr:
+	case ReportSDBLContext, ReportCALLContext, ReportDBMSSQLContext, ReportPostgresContext, ReportFileDBContext, ReportLockContext, ReportTimeoutContext, ReportDeadlockContext, ReportErrorDescr, ReportAnalyze, ReportCompare, ReportServe:
 	default:
 		return fmt.Errorf("unsupported report: %s", c.Report)
 	}
@@ -74,6 +89,54 @@ func (c Config) Validate() error {
 	case ModeAggregate, ModeRaw:
 	default:
 		return fmt.Errorf("unsupported mode: %s", c.Mode)
+	}
+	if c.Report == ReportCompare {
+		if c.BaselinePath == "" {
+			return fmt.Errorf("--baseline is required for compare")
+		}
+		if c.CurrentPath == "" {
+			return fmt.Errorf("--current is required for compare")
+		}
+		if c.OutputDir == "" {
+			return fmt.Errorf("--output is required")
+		}
+		if len(c.Formats) == 0 {
+			return fmt.Errorf("--format must contain at least one value")
+		}
+		if math.IsNaN(c.ThresholdPercent) || math.IsInf(c.ThresholdPercent, 0) || c.ThresholdPercent < 0 {
+			return fmt.Errorf("--threshold-pct must not be negative")
+		}
+		if math.IsNaN(c.ThresholdAbsMicros) || math.IsInf(c.ThresholdAbsMicros, 0) || c.ThresholdAbsMicros < 0 {
+			return fmt.Errorf("--threshold-abs-us must not be negative")
+		}
+		return nil
+	}
+	if c.Report == ReportServe {
+		if c.InputRoot == "" {
+			return fmt.Errorf("--input is required")
+		}
+		if c.Glob == "" {
+			return fmt.Errorf("--glob is required")
+		}
+		if err := validateLoopbackListen(c.Listen); err != nil {
+			return err
+		}
+		if c.TopN <= 0 {
+			return fmt.Errorf("--top must be greater than 0")
+		}
+		if c.Workers <= 0 {
+			return fmt.Errorf("--workers must be greater than 0")
+		}
+		if c.BucketInterval <= 0 {
+			return fmt.Errorf("--bucket must be greater than 0")
+		}
+		if c.MaxRuns <= 0 {
+			return fmt.Errorf("--max-runs must be greater than 0")
+		}
+		if c.MaxConcurrentRuns <= 0 {
+			return fmt.Errorf("--max-concurrent must be greater than 0")
+		}
+		return nil
 	}
 	if c.InputRoot == "" {
 		return fmt.Errorf("--input is required")
@@ -101,8 +164,34 @@ func (c Config) Validate() error {
 	if c.MinDurationMicros < 0 {
 		return fmt.Errorf("--duration must not be negative")
 	}
+	if c.Report == ReportAnalyze && c.BucketInterval <= 0 {
+		return fmt.Errorf("--bucket must be greater than 0")
+	}
 	if err := c.TimeRange.Validate(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateLoopbackListen(address string) error {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("invalid --listen %q: %w", address, err)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return validateListenPort(port)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("--listen must use a loopback address")
+	}
+	return validateListenPort(port)
+}
+
+func validateListenPort(port string) error {
+	value, err := strconv.Atoi(port)
+	if err != nil || value < 1 || value > 65535 {
+		return fmt.Errorf("--listen port must be an integer from 1 to 65535")
 	}
 	return nil
 }

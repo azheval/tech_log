@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Techlog Stat</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to results</a>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <div class="brand" aria-label="Techlog Stat">
+        <span class="brand-mark" aria-hidden="true">TL</span>
+        <div><p class="eyebrow">TECHLOG STAT</p><h1>Technology Log Analysis</h1></div>
+      </div>
+      <div class="header-actions">
+        <button id="toggle-sidebar" class="sidebar-toggle" type="button" aria-controls="control-sidebar" aria-expanded="true" title="Hide control panel"><span aria-hidden="true">☰</span><span class="sidebar-toggle-label">Hide panel</span></button>
+        <p id="api-status" class="connection-status pending" role="status"><span aria-hidden="true"></span>Checking connection</p>
+      </div>
+    </div>
+  </header>
+  <main id="content" class="app-shell">
+    <aside id="control-sidebar" class="sidebar" aria-label="Analysis controls">
+      <section class="card run-card" aria-labelledby="run-form-title">
+        <div class="card-heading"><div><p class="eyebrow">ANALYSIS</p><h2 id="run-form-title">New Run</h2></div></div>
+        <form id="run-form" class="run-form">
+          <div class="form-field form-field-wide"><label for="input">Log Directory</label><input id="input" name="input" type="text" required autocomplete="off" placeholder="C:\\v8\\logs"></div>
+          <div class="form-field form-field-wide"><label for="glob">File Pattern</label><input id="glob" name="glob" type="text" value="*.log" autocomplete="off"><small>For example: <code>*.log</code> or <code>*.lgp</code></small></div>
+          <details class="advanced-options">
+            <summary>Analysis Options</summary>
+            <div class="field-grid">
+              <div class="form-field"><label for="workers">Workers</label><input id="workers" name="workers" type="number" min="1" value="4"></div>
+              <div class="form-field"><label for="bucket">Interval</label><select id="bucket" name="bucket"><option value="1m">1 min</option><option value="5m" selected>5 min</option><option value="15m">15 min</option><option value="1h">1 hour</option></select></div>
+              <div class="form-field"><label for="top">Rows in Top</label><input id="top" name="top" type="number" min="1" max="10000" value="100"></div>
+              <div class="form-field"><label for="min-duration">Min. Duration, μs</label><input id="min-duration" name="min-duration" type="number" min="0" value="0"></div>
+            </div>
+          </details>
+          <div class="button-row"><button type="submit" class="primary"><span aria-hidden="true">▶</span> Start Analysis</button><button id="cancel-run" class="secondary" type="button" disabled>Cancel</button></div>
+        </form>
+        <p id="run-message" class="message" role="status"></p>
+      </section>
+      <section class="card compare-card" aria-labelledby="compare-title">
+        <div class="card-heading"><div><p class="eyebrow">TRENDS</p><h2 id="compare-title">Run Comparison</h2></div></div>
+        <p class="card-description">Compare two completed analyses.</p>
+        <div class="form-field"><label for="baseline">Baseline Run</label><select id="baseline"><option value="">Select a run</option></select></div>
+        <div class="form-field"><label for="current">Current Run</label><select id="current"><option value="">Select a run</option></select></div>
+        <button id="compare" type="button" class="secondary full-width">Compare Results</button>
+      </section>
+    </aside>
+    <section class="main-column" aria-label="Analysis results">
+      <section class="card runs-card" aria-labelledby="runs-title">
+        <div class="section-toolbar"><div><p class="eyebrow">HISTORY</p><h2 id="runs-title">Runs</h2></div><button id="refresh-runs" type="button" class="icon-button" title="Refresh run list" aria-label="Refresh run list">↻</button></div>
+        <div id="runs" class="run-list" aria-live="polite"></div>
+      </section>
+      <section class="card results-card">
+        <div class="result-header">
+          <div><p id="selected-run" class="eyebrow">SELECT A RUN</p><h2 id="view-title">Analysis Results</h2></div>
+          <div id="downloads" class="downloads" aria-label="Download report"></div>
+        </div>
+        <nav class="tabs" aria-label="Report sections" role="tablist">
+          <button role="tab" aria-selected="true" aria-controls="view" id="tab-overview" data-view="overview" tabindex="0">Aggregates</button><button role="tab" aria-selected="false" aria-controls="view" id="tab-events" data-view="events" tabindex="-1">Events</button><button role="tab" aria-selected="false" aria-controls="view" id="tab-sql" data-view="sql" tabindex="-1">SQL</button><button role="tab" aria-selected="false" aria-controls="view" id="tab-traces" data-view="traces" tabindex="-1">Traces</button><button role="tab" aria-selected="false" aria-controls="view" id="tab-locks" data-view="locks" tabindex="-1">Locks</button><button role="tab" aria-selected="false" aria-controls="view" id="tab-sources" data-view="sources" tabindex="-1">Source Events</button>
+        </nav>
+        <div class="filters" aria-label="Result filters">
+          <div class="filter-search"><label for="search">Search data</label><input id="search" type="search" placeholder="Event, query, user"></div>
+          <div class="filter-select"><label for="group-by">Group by</label><select id="group-by"><option value="event_types">Event Type</option><option value="time_buckets">Time Interval</option><option value="contexts">Context</option><option value="users">User</option><option value="databases">Database</option><option value="processes">Process</option></select></div>
+          <div class="filter-select"><label for="severity">Severity</label><select id="severity"><option value="">All Levels</option><option value="error">Errors</option><option value="warning">Warnings</option></select></div>
+          <div class="filter-select"><label for="limit">Show Rows</label><select id="limit"><option>25</option><option selected>100</option><option>500</option></select></div>
+          <button id="reset-filters" type="button" class="secondary reset-filters">Reset</button>
+          <button id="column-settings" type="button" class="secondary column-settings" aria-expanded="false" aria-controls="column-panel" disabled>Columns</button>
+        </div>
+        <section id="column-panel" class="column-panel" aria-labelledby="column-settings" hidden></section>
+        <div id="drilldown" class="drilldown" hidden></div>
+        <div id="view" class="result-view" role="tabpanel" aria-labelledby="tab-overview" tabindex="0"><div class="empty-state"><strong>Results will appear here</strong><p>Select a run from the list or start a new analysis.</p></div></div>
+      </section>
+    </section>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>

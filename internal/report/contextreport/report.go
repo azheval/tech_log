@@ -1,22 +1,17 @@
-﻿package contextreport
+package contextreport
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
-	"io"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"techlog-stat/internal/config"
 	"techlog-stat/internal/discovery"
 	"techlog-stat/internal/model"
 	"techlog-stat/internal/report/reportutil"
+	"techlog-stat/internal/techlog"
 )
 
 const toolVersion = "0.1.0"
@@ -24,17 +19,7 @@ const toolVersion = "0.1.0"
 type reportSpec struct {
 	reportName       string
 	eventNames       map[string]struct{}
-	contextPattern   string
 	contextEventName string
-}
-
-type eventHeader struct {
-	EventName    string
-	DurationMS   float64
-	DurationUS   int64
-	Timestamp    time.Time
-	HourBucket   time.Time
-	SourcePrefix string
 }
 
 type pendingCall struct {
@@ -90,20 +75,6 @@ type rawFileResult struct {
 	file   string
 	result rawParseResult
 	terr   error
-}
-
-type parser struct {
-	spec              reportSpec
-	file              string
-	fileHour          time.Time
-	timeRange         config.TimeRange
-	filters           []config.Filter
-	minDurationMicros int64
-	emit              func(parsedContextEvent)
-	current           strings.Builder
-	currentHeader     eventHeader
-	hasCurrent        bool
-	pendingCalls      map[string]pendingCall
 }
 
 func Build(cfg config.Config) (model.ContextReport, error) {
@@ -221,21 +192,21 @@ func normalizeWorkers(workers int) int {
 func specForReport(report string) (reportSpec, bool) {
 	switch report {
 	case config.ReportSDBLContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("SDBL"), contextPattern: "Context="}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("SDBL")}, true
 	case config.ReportCALLContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("CALL"), contextPattern: "Context=", contextEventName: "Context"}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("CALL"), contextEventName: "Context"}, true
 	case config.ReportDBMSSQLContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("DBMSSQL"), contextPattern: "Context="}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("DBMSSQL")}, true
 	case config.ReportPostgresContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("DBPOSTGRS"), contextPattern: "Context="}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("DBPOSTGRS")}, true
 	case config.ReportFileDBContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("DBV8DBEng"), contextPattern: "Context="}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("DBV8DBEng")}, true
 	case config.ReportLockContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("TLOCK", "TTIMEOUT", "TDEADLOCK"), contextPattern: "Context="}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("TLOCK", "TTIMEOUT", "TDEADLOCK")}, true
 	case config.ReportTimeoutContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("TTIMEOUT"), contextPattern: "Context="}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("TTIMEOUT")}, true
 	case config.ReportDeadlockContext:
-		return reportSpec{reportName: report, eventNames: makeEventSet("TDEADLOCK"), contextPattern: "Context="}, true
+		return reportSpec{reportName: report, eventNames: makeEventSet("TDEADLOCK")}, true
 	default:
 		return reportSpec{}, false
 	}
@@ -323,46 +294,26 @@ func processFileRaw(path string, spec reportSpec, filters []config.Filter, minDu
 }
 
 func processFile(path string, spec reportSpec, filters []config.Filter, minDurationMicros int64, timeRange config.TimeRange, emit func(parsedContextEvent)) (parseResult, error) {
-	file, err := os.Open(path)
+	pendingCalls := make(map[string]pendingCall)
+	stats, err := techlog.ParseFile(path, func(event techlog.Event) error {
+		if spec.reportName == config.ReportCALLContext {
+			consumeCallContextEvent(event, spec, filters, minDurationMicros, timeRange, pendingCalls, emit)
+			return nil
+		}
+		if !spec.matchesEvent(event.Name) || !matchesEvent(event, filters, minDurationMicros, timeRange) {
+			return nil
+		}
+		context := eventContext(event)
+		if context == "" {
+			return nil
+		}
+		emitContextEvent(event, context, emit)
+		return nil
+	})
 	if err != nil {
-		return parseResult{}, err
+		return parseResult{bytesRead: stats.BytesRead}, err
 	}
-	defer file.Close()
-
-	fileHour, err := reportutil.ParseFileHour(path)
-	if err != nil {
-		return parseResult{}, err
-	}
-
-	reader := bufio.NewReaderSize(file, 4*1024*1024)
-	p := parser{
-		spec:              spec,
-		file:              path,
-		fileHour:          fileHour,
-		timeRange:         timeRange,
-		filters:           filters,
-		minDurationMicros: minDurationMicros,
-		emit:              emit,
-		pendingCalls:      make(map[string]pendingCall),
-	}
-	var bytesRead int64
-
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			bytesRead += int64(len(line))
-			p.consumeLine(line)
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return parseResult{bytesRead: bytesRead}, err
-		}
-	}
-
-	p.finishEvent()
-	return parseResult{processed: true, bytesRead: bytesRead}, nil
+	return parseResult{processed: true, bytesRead: stats.BytesRead}, nil
 }
 
 func newAggregator() aggregator {
@@ -475,122 +426,56 @@ func buildRawContextDays(collector rawCollector) []model.RawContextDay {
 	return days
 }
 
-func (p *parser) consumeLine(raw []byte) {
-	line := normalizeLine(raw)
-	if line == "" {
-		return
-	}
-
-	if isEventStart(line) {
-		p.finishEvent()
-		header, ok := parseEventHeader(line, p.fileHour)
-		if !ok {
-			return
-		}
-		p.currentHeader = header
-		p.hasCurrent = true
-		p.current.WriteString(line)
-		return
-	}
-
-	if !p.hasCurrent {
-		return
-	}
-	if p.current.Len() > 0 {
-		p.current.WriteByte(' ')
-	}
-	p.current.WriteString(line)
-}
-
-func (p *parser) finishEvent() {
-	if !p.hasCurrent {
-		p.resetCurrent()
-		return
-	}
-
-	eventText := p.current.String()
-	switch p.spec.reportName {
-	case config.ReportCALLContext:
-		p.finishCallContextEvent(p.currentHeader, eventText)
-	default:
-		if p.spec.matchesEvent(p.currentHeader.EventName) && p.matchesEventFilters(eventText, p.currentHeader) {
-			context := extractContext(eventText, p.spec)
-			if context != "" {
-				p.emit(parsedContextEvent{
-					Timestamp:      p.currentHeader.Timestamp,
-					HourBucket:     p.currentHeader.HourBucket,
-					Event:          p.currentHeader.EventName,
-					File:           p.file,
-					DurationMicros: p.currentHeader.DurationUS,
-					DurationMS:     p.currentHeader.DurationMS,
-					Context:        context,
-					ShortContext:   reportutil.ShortenContext(context),
-				})
-			}
-		}
-	}
-
-	p.resetCurrent()
-}
-
-func (p *parser) finishCallContextEvent(header eventHeader, eventText string) {
-	thread := extractFieldValue(eventText, "OSThread=")
+func consumeCallContextEvent(event techlog.Event, spec reportSpec, filters []config.Filter, minDurationMicros int64, timeRange config.TimeRange, pendingCalls map[string]pendingCall, emit func(parsedContextEvent)) {
+	thread := event.Fields["OSThread"]
 	if thread == "" {
 		return
 	}
-
-	if p.spec.matchesEvent(header.EventName) {
-		if p.matchesEventFilters(eventText, header) {
-			p.pendingCalls[thread] = pendingCall{event: model.RawContextEvent{
-				Timestamp:      header.Timestamp,
-				HourBucket:     header.HourBucket,
-				Event:          header.EventName,
-				File:           p.file,
-				DurationMicros: header.DurationUS,
-				DurationMS:     header.DurationMS,
-			}}
+	if spec.matchesEvent(event.Name) {
+		if matchesEvent(event, filters, minDurationMicros, timeRange) {
+			pendingCalls[thread] = pendingCall{event: rawContextEvent(event, "")}
 		}
 		return
 	}
-
-	if header.EventName != p.spec.contextEventName {
+	if event.Name != spec.contextEventName {
 		return
 	}
-	pending, ok := p.pendingCalls[thread]
+	pending, ok := pendingCalls[thread]
 	if !ok {
 		return
 	}
-	context := extractContext(eventText, p.spec)
+	context := eventContext(event)
 	if context == "" {
 		return
 	}
-	p.emit(parsedContextEvent{
-		Timestamp:      pending.event.Timestamp,
-		HourBucket:     pending.event.HourBucket,
-		Event:          pending.event.Event,
-		File:           pending.event.File,
-		DurationMicros: pending.event.DurationMicros,
-		DurationMS:     pending.event.DurationMS,
-		Context:        context,
-		ShortContext:   reportutil.ShortenContext(context),
+	emit(parsedContextEvent{
+		Timestamp: pending.event.Timestamp, HourBucket: pending.event.HourBucket,
+		Event: pending.event.Event, File: pending.event.File,
+		DurationMicros: pending.event.DurationMicros, DurationMS: pending.event.DurationMS,
+		Context: context, ShortContext: reportutil.ShortenContext(context),
 	})
-	delete(p.pendingCalls, thread)
+	delete(pendingCalls, thread)
 }
 
-func (p *parser) matchesEventFilters(event string, header eventHeader) bool {
-	if header.DurationUS < p.minDurationMicros {
-		return false
-	}
-	if !p.timeRange.Match(header.Timestamp) {
-		return false
-	}
-	return config.MatchAllFilters(event, p.filters)
+func matchesEvent(event techlog.Event, filters []config.Filter, minDurationMicros int64, timeRange config.TimeRange) bool {
+	return event.DurationMicros >= minDurationMicros && timeRange.Match(event.Timestamp) && config.MatchAllFilters(event.Raw, filters)
 }
 
-func (p *parser) resetCurrent() {
-	p.current.Reset()
-	p.currentHeader = eventHeader{}
-	p.hasCurrent = false
+func emitContextEvent(event techlog.Event, context string, emit func(parsedContextEvent)) {
+	row := rawContextEvent(event, context)
+	emit(parsedContextEvent{
+		Timestamp: row.Timestamp, HourBucket: row.HourBucket, Event: row.Event, File: row.File,
+		DurationMicros: row.DurationMicros, DurationMS: row.DurationMS,
+		Context: row.Context, ShortContext: row.ShortContext,
+	})
+}
+
+func rawContextEvent(event techlog.Event, context string) model.RawContextEvent {
+	return model.RawContextEvent{
+		Timestamp: event.Timestamp, HourBucket: event.Timestamp.Truncate(time.Hour), Event: event.Name,
+		File: event.Source, DurationMicros: event.DurationMicros, DurationMS: float64(event.DurationMicros) / 1000,
+		Context: context, ShortContext: reportutil.ShortenContext(context),
+	}
 }
 
 func (s reportSpec) matchesEvent(name string) bool {
@@ -642,106 +527,6 @@ func buildRows(agg aggregator, topN int) []model.ContextRow {
 	return rows
 }
 
-func normalizeLine(raw []byte) string {
-	raw = bytes.TrimRight(raw, "\r\n")
-	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
-	if len(raw) == 0 {
-		return ""
-	}
-	return collapseWhitespace(string(raw))
-}
-
-func collapseWhitespace(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	prevSpace := false
-	for _, r := range s {
-		if unicode.IsSpace(r) {
-			if prevSpace {
-				continue
-			}
-			b.WriteByte(' ')
-			prevSpace = true
-			continue
-		}
-		b.WriteRune(r)
-		prevSpace = false
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func isEventStart(line string) bool {
-	if len(line) < 12 {
-		return false
-	}
-	return isDigit(line[0]) && isDigit(line[1]) && line[2] == ':' && isDigit(line[3]) && isDigit(line[4]) && line[5] == '.'
-}
-
-func parseEventHeader(line string, fileHour time.Time) (eventHeader, bool) {
-	comma1 := strings.IndexByte(line, ',')
-	if comma1 <= 0 {
-		return eventHeader{}, false
-	}
-	prefix := line[:comma1]
-	minus := strings.LastIndexByte(prefix, '-')
-	if minus <= 0 || minus+1 >= len(prefix) {
-		return eventHeader{}, false
-	}
-	timePart := prefix[:minus]
-	durMicros, err := strconv.ParseInt(prefix[minus+1:], 10, 64)
-	if err != nil {
-		return eventHeader{}, false
-	}
-	if len(timePart) < len("00:00.000000") || timePart[2] != ':' || timePart[5] != '.' {
-		return eventHeader{}, false
-	}
-	minute, err := strconv.Atoi(timePart[0:2])
-	if err != nil {
-		return eventHeader{}, false
-	}
-	second, err := strconv.Atoi(timePart[3:5])
-	if err != nil {
-		return eventHeader{}, false
-	}
-	micros, err := strconv.Atoi(timePart[6:])
-	if err != nil {
-		return eventHeader{}, false
-	}
-	rest := line[comma1+1:]
-	comma2 := strings.IndexByte(rest, ',')
-	if comma2 <= 0 {
-		return eventHeader{}, false
-	}
-	ts := reportutil.BuildTimestamp(fileHour, minute, second, micros)
-	return eventHeader{EventName: rest[:comma2], DurationUS: durMicros, DurationMS: float64(durMicros) / 1000.0, Timestamp: ts, HourBucket: fileHour, SourcePrefix: prefix}, true
-}
-
-func extractContext(event string, spec reportSpec) string {
-	idx := strings.Index(event, spec.contextPattern)
-	if idx < 0 {
-		return ""
-	}
-	ctx := strings.TrimSpace(event[idx+len(spec.contextPattern):])
-	if len(spec.eventNames) == 1 {
-		if _, ok := spec.eventNames["CALL"]; ok {
-			if end := strings.Index(ctx, ",Interface="); end >= 0 {
-				ctx = ctx[:end]
-			}
-		}
-	}
-	ctx = strings.TrimSpace(ctx)
-	ctx = strings.Trim(ctx, "'\"")
-	return ctx
-}
-
-func extractFieldValue(event string, field string) string {
-	value, ok := config.ExtractFieldValue(event, strings.TrimSuffix(field, "="))
-	if !ok {
-		return ""
-	}
-	return value
-}
-
-func isDigit(b byte) bool {
-	return b >= '0' && b <= '9'
+func eventContext(event techlog.Event) string {
+	return strings.Join(strings.Fields(event.Fields["Context"]), " ")
 }

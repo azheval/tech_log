@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"techlog-stat/internal/model"
+	"techlog-stat/internal/report/overview"
 )
 
 func RenderSummary(report model.ContextReport) []byte {
@@ -69,6 +70,75 @@ func RenderErrorSummary(report model.ErrorReport) []byte {
 		fmt.Fprintf(&buf, "\n")
 	}
 
+	return withUTF8BOM(buf.Bytes())
+}
+
+func RenderOverviewText(report overview.OverviewResult) []byte {
+	var buf bytes.Buffer
+	fmt.Fprintln(&buf, "Report: Technological Log Overview")
+	fmt.Fprintf(&buf, "GeneratedAt: %s\n", report.Meta.FinishedAt.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(&buf, "InputRoot: %s\nGlob: %s\n", report.Meta.InputRoot, report.Meta.Glob)
+	fmt.Fprintf(&buf, "FilesMatched: %d\nFilesProcessed: %d\nFilesFailed: %d\n", report.Meta.FilesMatched, report.Meta.FilesProcessed, report.Meta.FilesFailed)
+	fmt.Fprintf(&buf, "EventsParsed: %d\nMalformedHeaders: %d\nOrphanLines: %d\nBytesRead: %d\n\n", report.Quality.EventsParsed, report.Quality.MalformedHeaders, report.Quality.OrphanLines, report.Quality.BytesRead)
+	fmt.Fprintf(&buf, "TotalEvents: %d\nTotalDurationMicros: %s\nAverageDurationMicros: %s\n\n", report.Totals.Count, formatHumanFloat(report.Totals.Duration.Sum), formatHumanFloat(report.Totals.Duration.Mean))
+	fmt.Fprintln(&buf, "EventTypes:")
+	for _, row := range report.EventTypes {
+		duration := row.Stats.Duration
+		fmt.Fprintf(&buf, "%s: count=%d total_us=%s p95_us=%s max_us=%s\n", row.Event, row.Stats.Count, formatHumanFloat(duration.Sum), formatHumanFloat(duration.P95), formatHumanFloat(duration.Max))
+	}
+	fmt.Fprintln(&buf, "\nTopSQL:")
+	for index, row := range report.SQLRows {
+		if index == 20 {
+			fmt.Fprintf(&buf, "... %d more SQL rows in sql.csv and run.json\n", len(report.SQLRows)-index)
+			break
+		}
+		fmt.Fprintf(&buf, "%d. %s count=%d total_us=%d p95_us=%d query=%s\n", index+1, row.EventType, row.Count, row.TotalDurationMicros, row.P95DurationMicros, row.NormalizedQuery)
+	}
+	fmt.Fprintln(&buf, "\nTraceQuality:")
+	quality := report.TraceQuality
+	fmt.Fprintf(&buf, "EventsConsumed=%d Calls=%d Contexts=%d CorrelatedEvents=%d OrphanEvents=%d MissingContextTraces=%d\n", quality.EventsConsumed, quality.Calls, quality.Contexts, quality.CorrelatedEvents, quality.OrphanEvents, quality.MissingContextTraces)
+	fmt.Fprintf(&buf, "EvictedOpenTraces=%d EvictedCompletedTraces=%d RetainedOpenTraces=%d RetainedCompletedTraces=%d\n", quality.EvictedOpenTraces, quality.EvictedCompletedTraces, quality.RetainedOpenTraces, quality.RetainedCompletedTraces)
+	fmt.Fprintln(&buf, "\nLocksSummary:")
+	locks := report.Locks
+	fmt.Fprintf(&buf, "LockEvents=%d Types=%d Contexts=%d Tables=%d Regions=%d TopConflicts=%d Samples=%d ExplicitRelations=%d\n", locks.Quality.LockEvents, len(locks.ByEvent), len(locks.ByContext), len(locks.ByTable), len(locks.ByRegion), len(locks.TopConflicts), len(locks.Samples), len(locks.Relations))
+	fmt.Fprintln(&buf, "LockQuality:")
+	fmt.Fprintf(&buf, "IgnoredEvents=%d MissingContext=%d MissingLocks=%d MissingRegions=%d EventsWithExplicitRelation=%d\n", locks.Quality.IgnoredEvents, locks.Quality.MissingContext, locks.Quality.MissingLocks, locks.Quality.MissingRegions, locks.Quality.EventsWithExplicitRelation)
+	fmt.Fprintln(&buf, "TopLockConflicts:")
+	for index, row := range locks.TopConflicts {
+		if index == 20 {
+			fmt.Fprintf(&buf, "... %d more conflicts in locks.csv and run.json\n", len(locks.TopConflicts)-index)
+			break
+		}
+		fmt.Fprintf(&buf, "%d. %s context=%s tables=%v regions=%v count=%d total_us=%d p95_us=%d\n", index+1, row.EventType, row.Context, row.Tables, row.Regions, row.Stats.Count, row.Stats.TotalMicros, row.Stats.P95Micros)
+	}
+	fmt.Fprintln(&buf, "\nSCALLSummary:")
+	fmt.Fprintf(&buf, "Calls=%d Groups=%d Interfaces=%d Methods=%d SlowSamples=%d\n", report.SCALL.Quality.CallEvents, len(report.SCALL.ByCall), len(report.SCALL.ByInterface), len(report.SCALL.ByMethod), len(report.SCALL.SlowSamples))
+	for index, row := range report.SCALL.ByCall {
+		if index == 10 {
+			fmt.Fprintf(&buf, "... %d more SCALL rows in scall.csv and run.json\n", len(report.SCALL.ByCall)-index)
+			break
+		}
+		fmt.Fprintf(&buf, "%d. interface=%s iname=%s method=%s count=%d total_us=%s p95_us=%s\n", index+1, row.Interface, row.IName, row.Method, row.Metrics.Duration.Count, formatHumanFloat(row.Metrics.Duration.Sum), formatHumanFloat(row.Metrics.Duration.P95))
+	}
+	fmt.Fprintln(&buf, "\nWebSummary:")
+	fmt.Fprintf(&buf, "Requests=%d Responses=%d Matched=%d OrphanResponses=%d CacheEvents=%d CacheHits=%d CacheMisses=%d\n", report.Web.Quality.Requests, report.Web.Quality.Responses, report.Web.Quality.MatchedResponses, report.Web.Quality.OrphanResponses, report.Web.Quality.CacheEvents, report.Web.Quality.CacheHits, report.Web.Quality.CacheMisses)
+	for index, row := range report.Web.Requests {
+		if index == 10 {
+			fmt.Fprintf(&buf, "... %d more web rows in web.csv and run.json\n", len(report.Web.Requests)-index)
+			break
+		}
+		fmt.Fprintf(&buf, "%d. %s %s status=%s count=%d total_us=%d p95_us=%d\n", index+1, row.Method, row.URI, row.Status, row.Count, row.Stats.TotalMicros, row.Stats.P95Micros)
+	}
+	fmt.Fprintln(&buf, "\nSessionsSummary:")
+	fmt.Fprintf(&buf, "LifecycleEvents=%d Completed=%d Open=%d OrphanFinishes=%d Peak=%d DurationSource=timestamp_pair\n", report.Sessions.Quality.LifecycleEvents, report.Sessions.Quality.CompletedSessions, report.Sessions.Quality.OpenSessions, report.Sessions.Quality.UnmatchedFinishes, report.Sessions.Peak)
+	fmt.Fprintln(&buf, "\nProcessSummary:")
+	fmt.Fprintf(&buf, "PROC=%d SCOM=%d ProcessGroups=%d Operations=%d ExplicitRelations=%d\n", report.ProcessStats.Quality.PROCEvents, report.ProcessStats.Quality.SCOMEvents, len(report.ProcessStats.PROCByProcess), len(report.ProcessStats.SCOMByOperation), len(report.ProcessStats.ExplicitProcessRelations))
+	fmt.Fprintln(&buf, "\nLicenseSummary:")
+	fmt.Fprintf(&buf, "LIC=%d HASP=%d Failures=%d Expired=%d WrongType=%d LicenseGroups=%d HASPGroups=%d\n", report.Licenses.Quality.LicenseEvents, report.Licenses.Quality.HASPEvents, report.Licenses.Quality.Failures, report.Licenses.Quality.Expired, report.Licenses.Quality.WrongType, len(report.Licenses.Licenses), len(report.Licenses.HASP))
+	fmt.Fprintln(&buf, "\nErrorContextSummary:")
+	fmt.Fprintf(&buf, "Errors=%d Contexts=%d Matched=%d Orphan=%d Ambiguous=%d Groups=%d\n", report.ErrorContext.Quality.ErrorEvents, report.ErrorContext.Quality.ContextEvents, report.ErrorContext.Quality.MatchedContexts, report.ErrorContext.Quality.OrphanContexts, report.ErrorContext.Quality.AmbiguousContexts, len(report.ErrorContext.Groups))
+	fmt.Fprintln(&buf, "\nFileDBSummary:")
+	fmt.Fprintf(&buf, "DBV8DBEng=%d FuncGroups=%d Tables=%d Categories=%d Classes=%d ExplicitErrors=%d\n", report.FileDB.Quality.DBV8DBEngEvents, len(report.FileDB.ByFunc), len(report.FileDB.ByTable), len(report.FileDB.ByCategory), len(report.FileDB.ByClass), report.FileDB.Quality.ExplicitErrorEvents)
 	return withUTF8BOM(buf.Bytes())
 }
 

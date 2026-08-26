@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"techlog-stat/internal/model"
+	"techlog-stat/internal/report/overview"
 )
 
 func RenderRunJSON(report model.ContextReport) ([]byte, error) {
@@ -19,5 +20,9 @@ func RenderRawContextJSON(report model.RawContextReport) ([]byte, error) {
 }
 
 func RenderRawErrorJSON(report model.RawErrorReport) ([]byte, error) {
+	return json.MarshalIndent(report, "", "  ")
+}
+
+func RenderOverviewJSON(report overview.OverviewResult) ([]byte, error) {
 	return json.MarshalIndent(report, "", "  ")
 }

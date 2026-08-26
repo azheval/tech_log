@@ -1,23 +1,18 @@
-﻿package errorreport
+package errorreport
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
-	"io"
-	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"techlog-stat/internal/config"
 	"techlog-stat/internal/discovery"
 	"techlog-stat/internal/model"
 	"techlog-stat/internal/report/reportutil"
+	"techlog-stat/internal/techlog"
 )
 
 const toolVersion = "0.1.0"
@@ -25,14 +20,6 @@ const toolVersion = "0.1.0"
 type reportSpec struct {
 	reportName string
 	eventNames map[string]struct{}
-}
-
-type eventHeader struct {
-	EventName  string
-	DurationUS int64
-	DurationMS float64
-	Timestamp  time.Time
-	HourBucket time.Time
 }
 
 type errorKey struct {
@@ -91,24 +78,15 @@ type rawFileResult struct {
 	terr   error
 }
 
-type parser struct {
-	spec              reportSpec
-	file              string
-	fileHour          time.Time
-	timeRange         config.TimeRange
-	filters           []config.Filter
-	minDurationMicros int64
-	emit              func(parsedErrorEvent)
-	current           strings.Builder
-	currentHeader     eventHeader
-	hasCurrent        bool
-}
-
 var (
-	reIPv6 = regexp.MustCompile(`\[[\w:]+%?\d*\]:\w+`)
-	reIPv4 = regexp.MustCompile(`\d+\.\d+\.\d+\.\d+:\d+`)
-	reUUID = regexp.MustCompile(`[\w\d]{8}-[\w\d]{4}-[\w\d]{4}-[\w\d]{4}-[\w\d]{12}`)
-	reDtTm = regexp.MustCompile(`\\x{043D}\\x{0430}\\x{0447}\\x{0430}\\x{0442}:(\\s+\\d\\d\\.\\d\\d\\.\\d{4}\\s+\\x{0432}\\s+\\d+:\\d+:\\d+)`)
+	// Endpoints are normalized before other volatile values so that an IPv4
+	// address embedded in an IPv6-mapped address cannot be handled separately.
+	reIPv6 = regexp.MustCompile(`(?i)\[[0-9a-f:.]+(?:%[0-9a-z_.-]+)?\]:\d{1,5}`)
+	reIPv4 = regexp.MustCompile(`\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}:\d{1,5}\b`)
+	reUUID = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b`)
+	// Descriptions can contain either readable Russian text or the escaped
+	// Unicode representation emitted by some technological-log messages.
+	reDtTm = regexp.MustCompile(`(?i)(?:начат|\\x\{043d\}\\x\{0430\}\\x\{0447\}\\x\{0430\}\\x\{0442\})\s*:\s*\d{1,2}\.\d{1,2}\.\d{4}\s+(?:в|\\x\{0432\})\s+\d{1,2}:\d{2}(?::\d{2})?`)
 )
 
 func Build(cfg config.Config) (model.ErrorReport, error) {
@@ -302,33 +280,31 @@ func processFileRaw(path string, spec reportSpec, filters []config.Filter, minDu
 }
 
 func processFile(path string, spec reportSpec, filters []config.Filter, minDurationMicros int64, timeRange config.TimeRange, emit func(parsedErrorEvent)) (parseResult, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return parseResult{}, err
-	}
-	defer file.Close()
-	fileHour, err := reportutil.ParseFileHour(path)
-	if err != nil {
-		return parseResult{}, err
-	}
-	reader := bufio.NewReaderSize(file, 4*1024*1024)
-	p := parser{spec: spec, file: path, fileHour: fileHour, timeRange: timeRange, filters: filters, minDurationMicros: minDurationMicros, emit: emit}
-	var bytesRead int64
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			bytesRead += int64(len(line))
-			p.consumeLine(line)
+	stats, err := techlog.ParseFile(path, func(event techlog.Event) error {
+		if !spec.matchesEvent(event.Name) || !matchesEventFilters(event, filters, minDurationMicros, timeRange) {
+			return nil
 		}
-		if err == io.EOF {
-			break
+		descr := extractDescription(event)
+		if descr == "" {
+			return nil
 		}
-		if err != nil {
-			return parseResult{bytesRead: bytesRead}, err
-		}
-	}
-	p.finishEvent()
-	return parseResult{processed: true, bytesRead: bytesRead}, nil
+		emit(parsedErrorEvent{
+			Timestamp:        event.Timestamp,
+			HourBucket:       time.Date(event.Timestamp.Year(), event.Timestamp.Month(), event.Timestamp.Day(), event.Timestamp.Hour(), 0, 0, 0, event.Timestamp.Location()),
+			Event:            event.Name,
+			File:             event.Source,
+			DurationMicros:   event.DurationMicros,
+			DurationMS:       float64(event.DurationMicros) / 1000.0,
+			Description:      descr,
+			ShortDescription: reportutil.ShortenDescription(descr),
+		})
+		return nil
+	})
+	return parseResult{processed: err == nil, bytesRead: stats.BytesRead}, err
+}
+
+func matchesEventFilters(event techlog.Event, filters []config.Filter, minDurationMicros int64, timeRange config.TimeRange) bool {
+	return event.DurationMicros >= minDurationMicros && timeRange.Match(event.Timestamp) && config.MatchAllFilters(event.Raw, filters)
 }
 
 func newAggregator() aggregator {
@@ -440,71 +416,6 @@ func buildRawErrorDays(collector rawCollector) []model.RawErrorDay {
 	return days
 }
 
-func (p *parser) consumeLine(raw []byte) {
-	line := normalizeLine(raw)
-	if line == "" {
-		return
-	}
-	if isEventStart(line) {
-		p.finishEvent()
-		header, ok := parseEventHeader(line, p.fileHour)
-		if !ok {
-			return
-		}
-		p.currentHeader = header
-		p.hasCurrent = true
-		p.current.WriteString(line)
-		return
-	}
-	if !p.hasCurrent {
-		return
-	}
-	if p.current.Len() > 0 {
-		p.current.WriteByte(' ')
-	}
-	p.current.WriteString(line)
-}
-
-func (p *parser) finishEvent() {
-	if !p.hasCurrent {
-		p.resetCurrent()
-		return
-	}
-	eventText := p.current.String()
-	if p.spec.matchesEvent(p.currentHeader.EventName) && p.matchesEventFilters(eventText, p.currentHeader) {
-		descr := extractDescription(eventText)
-		if descr != "" {
-			p.emit(parsedErrorEvent{
-				Timestamp:        p.currentHeader.Timestamp,
-				HourBucket:       p.currentHeader.HourBucket,
-				Event:            p.currentHeader.EventName,
-				File:             p.file,
-				DurationMicros:   p.currentHeader.DurationUS,
-				DurationMS:       p.currentHeader.DurationMS,
-				Description:      descr,
-				ShortDescription: reportutil.ShortenDescription(descr),
-			})
-		}
-	}
-	p.resetCurrent()
-}
-
-func (p *parser) matchesEventFilters(event string, header eventHeader) bool {
-	if header.DurationUS < p.minDurationMicros {
-		return false
-	}
-	if !p.timeRange.Match(header.Timestamp) {
-		return false
-	}
-	return config.MatchAllFilters(event, p.filters)
-}
-
-func (p *parser) resetCurrent() {
-	p.current.Reset()
-	p.currentHeader = eventHeader{}
-	p.hasCurrent = false
-}
-
 func (s reportSpec) matchesEvent(name string) bool {
 	_, ok := s.eventNames[name]
 	return ok
@@ -554,99 +465,15 @@ func buildRows(agg aggregator, topN int) []model.ErrorRow {
 	return rows
 }
 
-func normalizeLine(raw []byte) string {
-	raw = bytes.TrimRight(raw, "\r\n")
-	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
-	if len(raw) == 0 {
-		return ""
-	}
-	return collapseWhitespace(string(raw))
-}
-
-func collapseWhitespace(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	prevSpace := false
-	for _, r := range s {
-		if unicode.IsSpace(r) {
-			if prevSpace {
-				continue
-			}
-			b.WriteByte(' ')
-			prevSpace = true
-			continue
-		}
-		b.WriteRune(r)
-		prevSpace = false
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func isEventStart(line string) bool {
-	if len(line) < 12 {
-		return false
-	}
-	return isDigit(line[0]) && isDigit(line[1]) && line[2] == ':' && isDigit(line[3]) && isDigit(line[4]) && line[5] == '.'
-}
-
-func parseEventHeader(line string, fileHour time.Time) (eventHeader, bool) {
-	comma1 := strings.IndexByte(line, ',')
-	if comma1 <= 0 {
-		return eventHeader{}, false
-	}
-	prefix := line[:comma1]
-	minus := strings.LastIndexByte(prefix, '-')
-	if minus <= 0 || minus+1 >= len(prefix) {
-		return eventHeader{}, false
-	}
-	timePart := prefix[:minus]
-	durMicros, err := strconv.ParseInt(prefix[minus+1:], 10, 64)
-	if err != nil {
-		return eventHeader{}, false
-	}
-	if len(timePart) < len("00:00.000000") || timePart[2] != ':' || timePart[5] != '.' {
-		return eventHeader{}, false
-	}
-	minute, err := strconv.Atoi(timePart[0:2])
-	if err != nil {
-		return eventHeader{}, false
-	}
-	second, err := strconv.Atoi(timePart[3:5])
-	if err != nil {
-		return eventHeader{}, false
-	}
-	micros, err := strconv.Atoi(timePart[6:])
-	if err != nil {
-		return eventHeader{}, false
-	}
-	rest := line[comma1+1:]
-	comma2 := strings.IndexByte(rest, ',')
-	if comma2 <= 0 {
-		return eventHeader{}, false
-	}
-	ts := reportutil.BuildTimestamp(fileHour, minute, second, micros)
-	return eventHeader{EventName: rest[:comma2], DurationUS: durMicros, DurationMS: float64(durMicros) / 1000.0, Timestamp: ts, HourBucket: fileHour}, true
-}
-
-func extractDescription(event string) string {
-	descr := extractTailValue(event, "Descr=")
+func extractDescription(event techlog.Event) string {
+	descr := event.Fields["Descr"]
 	if descr == "" {
-		descr = extractTailValue(event, "Description=")
+		descr = event.Fields["Description"]
 	}
 	if descr == "" {
 		return ""
 	}
-	descr = strings.Trim(descr, "'\"")
-	descr = normalizeDescription(descr)
-	return strings.TrimSpace(descr)
-}
-
-func extractTailValue(event string, field string) string {
-	idx := strings.Index(event, field)
-	if idx < 0 {
-		return ""
-	}
-	return strings.TrimSpace(event[idx+len(field):])
+	return normalizeDescription(strings.Join(strings.Fields(descr), " "))
 }
 
 func normalizeDescription(descr string) string {
@@ -655,8 +482,4 @@ func normalizeDescription(descr string) string {
 	descr = reUUID.ReplaceAllString(descr, "{UUID}")
 	descr = reDtTm.ReplaceAllString(descr, "{DtTm}")
 	return descr
-}
-
-func isDigit(b byte) bool {
-	return b >= '0' && b <= '9'
 }

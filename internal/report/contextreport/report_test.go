@@ -1,4 +1,4 @@
-﻿package contextreport
+package contextreport
 
 import (
 	"math"
@@ -96,9 +96,10 @@ func TestBuildCALLContextUsesFollowingContextEvent(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "procA_123", "26032306.log"), ""+
 		"56:15.431019-3000,CALL,1,process=1CV8C,OSThread=100,Interface=iface-1,Method=1\n"+
-		"56:15.431020-0,Context,1,process=1CV8C,OSThread=100,Context=Ctx.Call\n"+
 		"56:15.431021-2000,CALL,1,process=1CV8C,OSThread=200,Interface=iface-2,Method=2\n"+
-		"56:15.431022-0,Context,1,process=1CV8C,OSThread=200,Context=Other.Call\n")
+		"56:15.431022-0,Context,1,process=1CV8C,OSThread=100,Context=Ctx.Call\n"+
+		"; Multiline.Detail\n"+
+		"56:15.431023-0,Context,1,process=1CV8C,OSThread=200,Context=Other.Call\n")
 
 	cfg := config.Config{Report: config.ReportCALLContext, InputRoot: root, Glob: "*/*.log", OutputDir: filepath.Join(root, "out"), Formats: []string{"csv"}, TopN: 10, Workers: 1}
 	report, err := Build(cfg)
@@ -108,8 +109,11 @@ func TestBuildCALLContextUsesFollowingContextEvent(t *testing.T) {
 	if report.Totals.EventCount != 2 {
 		t.Fatalf("EventCount = %d, want 2", report.Totals.EventCount)
 	}
-	if report.Rows[0].Context != "Ctx.Call" || !almostEqual(report.Rows[0].TotalDurationMS, 3.0) {
+	if report.Rows[0].Context != "Ctx.Call ; Multiline.Detail" || !almostEqual(report.Rows[0].TotalDurationMS, 3.0) {
 		t.Fatalf("unexpected first row: %+v", report.Rows[0])
+	}
+	if len(report.Rows) != 2 || report.Rows[1].Context != "Other.Call" || !almostEqual(report.Rows[1].TotalDurationMS, 2.0) {
+		t.Fatalf("unexpected second row: %+v", report.Rows)
 	}
 }
 
@@ -227,10 +231,16 @@ func TestConfigAliasesResolveForDatabaseReports(t *testing.T) {
 	}
 }
 
-func TestExtractContextTrimsQuotes(t *testing.T) {
-	got := extractContext("SDBL,Rows=1,Context='Quoted.Context'", reportSpec{eventNames: makeEventSet("SDBL"), contextPattern: "Context="})
-	if got != "Quoted.Context" {
-		t.Fatalf("extractContext() = %q, want %q", got, "Quoted.Context")
+func TestBuildExtractsQuotedContext(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "procA_123", "26032306.log"), "56:15.431019-3,SDBL,1,Context='Quoted.Context'\n")
+	cfg := config.Config{Report: config.ReportSDBLContext, InputRoot: root, Glob: "*/*.log", OutputDir: filepath.Join(root, "out"), Formats: []string{"json"}, TopN: 10, Workers: 1}
+	report, err := Build(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Rows) != 1 || report.Rows[0].Context != "Quoted.Context" {
+		t.Fatalf("unexpected rows: %+v", report.Rows)
 	}
 }
 

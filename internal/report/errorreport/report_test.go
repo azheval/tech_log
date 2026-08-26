@@ -1,9 +1,10 @@
-﻿package errorreport
+package errorreport
 
 import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"techlog-stat/internal/config"
@@ -66,6 +67,42 @@ func TestBuildErrorDescrAppliesRawFilters(t *testing.T) {
 	}
 }
 
+func TestBuildErrorDescrParsesMultilineDescription(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "procA_123", "26032306.log"), ""+
+		"56:15.431019-1000,EXCP,1,process=1CV8C,Descr='first line\n"+
+		"second line with 127.0.0.1:1541'\n")
+
+	cfg := config.Config{Report: config.ReportErrorDescr, InputRoot: root, Glob: "*/*.log", OutputDir: filepath.Join(root, "out"), Formats: []string{"json"}, TopN: 10, Workers: 1}
+	report, err := Build(cfg)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(report.Rows) != 1 {
+		t.Fatalf("len(Rows) = %d, want 1", len(report.Rows))
+	}
+	if got, want := report.Rows[0].Description, "first line second line with {IPV4}"; got != want {
+		t.Fatalf("Description = %q, want %q", got, want)
+	}
+}
+
+func TestBuildErrorDescrReportsInvalidLogFilename(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "procA_123", "invalid.log"), "56:15.431019-1000,EXCP,1,Descr='failure'\n")
+
+	cfg := config.Config{Report: config.ReportErrorDescr, InputRoot: root, Glob: "*/*.log", OutputDir: filepath.Join(root, "out"), Formats: []string{"json"}, TopN: 10, Workers: 1}
+	report, err := Build(cfg)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.Meta.FilesProcessed != 0 || report.Meta.FilesFailed != 1 {
+		t.Fatalf("file counts = processed:%d failed:%d, want processed:0 failed:1", report.Meta.FilesProcessed, report.Meta.FilesFailed)
+	}
+	if len(report.Errors) != 1 || !strings.Contains(report.Errors[0], "invalid log filename \"invalid.log\"") {
+		t.Fatalf("Errors = %#v, want invalid filename diagnostic", report.Errors)
+	}
+}
+
 func TestNormalizeReportAlias(t *testing.T) {
 	if got := config.NormalizeReport(config.ReportEXCPDescr); got != config.ReportErrorDescr {
 		t.Fatalf("NormalizeReport(excp-descr) = %q, want %q", got, config.ReportErrorDescr)
@@ -76,6 +113,43 @@ func TestNormalizeDescriptionMasksDateTime(t *testing.T) {
 	got := normalizeDescription("prefix \\x{043D}\\x{0430}\\x{0447}\\x{0430}\\x{0442}: 12.02.2026 \\x{0432} 10:20:30")
 	if got != "prefix {DtTm}" {
 		t.Fatalf("normalizeDescription() = %q", got)
+	}
+}
+
+func TestNormalizeDescriptionMasksVolatileValues(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "Russian date and time",
+			in:   "операция начат: 2.3.2026 в 9:05:07",
+			want: "операция {DtTm}",
+		},
+		{
+			name: "IPv4 endpoint",
+			in:   "connection to 192.168.10.25:1541 failed",
+			want: "connection to {IPV4} failed",
+		},
+		{
+			name: "IPv6 endpoint with zone",
+			in:   "connection to [fe80::a8b:ccff:fe00:42%Ethernet-1]:1541 failed",
+			want: "connection to {IPV6} failed",
+		},
+		{
+			name: "UUID",
+			in:   "object 550E8400-E29B-41D4-A716-446655440000 is unavailable",
+			want: "object {UUID} is unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeDescription(tt.in); got != tt.want {
+				t.Fatalf("normalizeDescription() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

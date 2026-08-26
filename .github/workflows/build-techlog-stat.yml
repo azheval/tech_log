@@ -1,8 +1,5 @@
 name: Build and Release techlog-stat
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 on:
   workflow_dispatch:
   push:
@@ -12,17 +9,11 @@ on:
       - "v*"
   pull_request:
     paths:
-      - "cmd/**"
-      - "docs/**"
-      - "internal/**"
-      - "go.mod"
-      - "go.sum"
-      - "README.md"
-      - "LICENSE"
+      - "go/techlog-stat/**"
       - ".github/workflows/build-techlog-stat.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -31,6 +22,7 @@ jobs:
     defaults:
       run:
         shell: bash
+        working-directory: go/techlog-stat
     strategy:
       fail-fast: false
       matrix:
@@ -50,12 +42,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version-file: go/techlog-stat/go.mod
           cache: false
 
       - name: Build binary
@@ -84,7 +76,7 @@ jobs:
         run: tar -a -cf "${{ matrix.archive_name }}" "${{ matrix.package_dir }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.archive_name }}
           path: ${{ matrix.archive_name }}
@@ -95,16 +87,18 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: write
 
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
           merge-multiple: true
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release-artifacts/*
           generate_release_notes: true

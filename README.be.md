@@ -2,7 +2,11 @@
 
 [![Build](https://github.com/azheval/tech_log/actions/workflows/build-techlog-stat.yml/badge.svg)](https://github.com/azheval/tech_log/actions/workflows/build-techlog-stat.yml)
 
-`techlog-stat` — аўтаномная CLI-ўтыліта на Go для чытання тэхналагічных журналаў 1С і запісу агрэгаваных справаздач у файлы.
+`techlog-stat` — аўтаномная CLI-ўтыліта на Go для аналізу тэхналагічнага журнала 1С і стварэння справаздач.
+
+![img_001](/docs/img/001.png)
+
+![img_002](/docs/img/002.png)
 
 ## Мовы
 
@@ -10,81 +14,107 @@
 - Беларуская: `README.be.md`
 - Русский: [README.ru.md](/README.ru.md)
 
-## Дакументацыя Версіі
+## Дакументацыя
 
-- Падрабязная спецыфікацыя v1 па-беларуску: [docs/techlog-stat-v1.be.md](/docs/techlog-stat-v1.be.md)
-- English version: [docs/techlog-stat-v1.en.md](/docs/techlog-stat-v1.en.md)
-- Русская версия: [docs/techlog-stat-v1.ru.md](/docs/techlog-stat-v1.ru.md)
+- Актуальная спецыфікацыя v2: [docs/techlog-stat-v2.be.md](/docs/techlog-stat-v2.be.md)
+- English: [docs/techlog-stat-v2.en.md](/docs/techlog-stat-v2.en.md)
+- Русский: [docs/techlog-stat-v2.ru.md](/docs/techlog-stat-v2.ru.md)
+- Гістарычная спецыфікацыя v1: [docs/techlog-stat-v1.be.md](/docs/techlog-stat-v1.be.md)
 
-## Бягучыя Справаздачы
+## Каманды
 
-Падтрымліваюцца справаздачы:
+Падтрымліваюцца ранейшыя спецыялізаваныя справаздачы:
 
-- `sdbl-context`
-- `call-context`
-- `dbmssql-context`
-- `postgres-context` або `dbpostgrs-context`
-- `file-context` або `dbv8dbeng-context`
-- `lock-context` або `locks-context`
-- `timeout-context`
-- `deadlock-context`
-- `error-descr` або `excp-descr`
+- `sdbl-context`, `call-context`;
+- `dbmssql-context`, `postgres-context`, `file-context`;
+- `lock-context`, `timeout-context`, `deadlock-context`;
+- `error-descr`.
 
-Агрэгаваны рэжым выкарыстоўваецца па змаўчанні:
+Новыя каманды:
 
-- справаздачы аб кантэксце запісваюць `summary.txt`, `contexts.csv`, `run.json`, `errors.log`
-- справаздачы аб памылках запісваюць `summary.txt`, `errors.csv`, `run.json`, `errors.log`
+- `analyze` — адзіны аналіз усіх падзей за адзін праход;
+- `compare` — параўнанне двух вынікаў `analyze` і пошук рэгрэсій.
 
-Рэжым raw уключаецца з дапамогай `--mode raw`:
+## Лакальны web-інтэрфейс: `serve`
 
-- захоўвае ўсе бягучыя фільтры raw-падзей
-- запісвае першыя N асобных падзей у гадзіну
-- групуе вывад па дні і гадзіне
-- запісвае `raw.txt`, `raw.csv`, `raw.json`, `errors.log`
+Запусціце лакальны інтэрфейс, задаўшы каталог, дзе дазволены пошук журналаў:
 
-## Фільтры
-
-Падтрымліваемыя фільтры прымяняюцца перад агрэгацыяй або неапрацаваным ранжыраваннем:
-
-- `--glob`
-- `--filter key=value`
-- `--duration`
-- `--date-from YYYY-MM-DD`
-- `--date-to YYYY-MM-DD`
-- `--time-from HH:MM[:SS]`
-- `--time-to HH:MM[:SS]`
-
-## Прыклад
-
-```bash
-./techlog-stat.exe call-context --input C:/v8/logs --glob "rphost_*/*.log" --output C:/reports/call_2026-03-24 --top 10 --workers 10 --format text --filter Usr=DefUser --filter DataBase=conf_null --duration 1s
+```powershell
+./techlog-stat.exe serve --input C:/v8/logs --listen 127.0.0.1:8080
 ```
 
-Топ падзеі за гадзіну:
+Адкрыйце паказаны лакальны адрас у браўзеры. Frontend убудаваны ў выканальны файл, аўтаномны і не выкарыстоўвае CDN або іншыя знешнія assets. У ім можна ствараць запускі аналізу, бачыць іх статус і progress, а таксама запытваць адмену. Форма дазваляе выбраць каталог толькі ў межах root з `--input` і glob файлаў адносна выбранага каталога; даступныя параметры аналізу і фільтры.
 
-```bash
-./techlog-stat.exe call-context --mode raw --input C:/v8/logs --glob "rphost_*/*.log" --output C:/reports/call_raw_2026-03-24 --top 10 --filter Usr=DefUser --filter DataBase=conf_null --duration 5 --date-from 2026-03-24 --date-to 2026-03-24 --time-from 09:00 --time-to 18:00
+Укладкі «Агляд», «Падзеі», SQL, «Трасы», «Блакіроўкі» і «Зыходныя» дазваляюць фільтраваць радкі і пераходзіць ад захаваных агрэгатаў да зыходных падзей. Drill-down зыходных падзей паўторна чытае толькі файлы, matched канкрэтным запускам, і ніколі не прымае ад браўзера шлях або glob. У інтэрфейсе можна параўнаць два завершаныя in-memory запускі. Для выбранага запуску фарміруюцца downloads CSV, JSON і аўтаномнага HTML.
+
+Сервер прымае толькі loopback-адрасы `--listen`; не выкарыстоўвайце яго як сеткавы сэрвіс. Запускі і вынікі захоўваюцца толькі ў памяці і знікаюць пры спыненні працэсу. Захоўванне абмежавана (`--max-runs`, па змаўчанні `8`): завершаныя запускі могуць выдаляцца, каб вызваліць месца; колькасць адначасовых аналізаў абмежавана `--max-concurrent` (па змаўчанні `1`).
+
+## Адзіны аналіз
+
+```powershell
+./techlog-stat.exe analyze `
+  --input C:/v8/logs `
+  --glob "rphost_*/*.log" `
+  --output C:/reports/overview `
+  --workers 8 --bucket 1m --top 100 `
+  --filter DataBase=conf_null --duration 500ms `
+  --format text,csv,json,html
 ```
 
-## Нататкі
+Фільтры `--filter`, `--duration`, `--date-from`, `--date-to`, `--time-from` і `--time-to` прымяняюцца да ўсіх раздзелаў: totals, SQL, трас, блакіровак.
 
-Падзеі базы даных супастаўляюцца так:
+Вынікі `analyze`:
 
-- `dbmssql-context` -> `DBMSSQL`
-- `postgres-context` / `dbpostgrs-context` -> `DBPOSTGRS`
-- `file-context` / `dbv8dbeng-context` -> `DBV8DBEng`
+- `summary.txt` — агульная зводка і раздзелы SQL, трас, SCALL, VRS, жыццевых цыклаў, працэсаў, ліцэнзій, кантэксту памылак і файлавай базы;
+- `event_types.csv` — статыстыка па тыпах падзей;
+- `sql.csv` — SQL/SDBL fingerprints і метрыкі;
+- `traces.csv` — ланцужкі CALL, Context, SDBL, DBMS і памылак;
+- `locks.csv` — блакіроўкі, канфлікты, рэгіены і сувязі;
+- `scall.csv`, `web.csv`, `sessions.csv`, `processes.csv`, `licenses.csv`, `filedb.csv`, `error_contexts.csv` — дадатковыя раздзелы для расследавання;
+- `run.json` — поўны машыначытальны вынік, у тым ліку новыя раздзелы і лічыльнікі якасці;
+- `report.html` — аўтаномны інтэрактыўны dashboard з абмежаванымі панэлямі даступных раздзелаў;
+- `errors.log` — памылкі асобных файлаў.
 
-Падзеі блакіровак супастаўляюцца так:
+HTML працуе без CDN і падключэння да сеткі. Даступныя часавы графік, укладкі, пошук, сартаванне, фільтр `(unknown)` і дэталі падзей, якія раскрываюцца.
 
-- `lock-context` / `locks-context` -> `TLOCK`, `TTIMEOUT`, `TDEADLOCK`
-- `timeout-context` -> `TTIMEOUT`
-- `deadlock-context` -> `TDEADLOCK`
+## Пашыраныя раздзелы analyze
 
-Падзеі памылак супастаўляюцца так:
+`analyze` чытае выбраны паток журнала адзін раз і фарміруе асобныя раздзелы для:
 
-- `error-descr` / `excp-descr` -> `EXCP`, `QERR`
-- апісанні нармалізуюцца па аналогіі з legacy Perl-скрыптам:
-  - IPv6 endpoints -> `{IPV6}`
-  - IPv4 endpoints -> `{IPV4}`
-  - UUIDs -> `{UUID}`
-  - фрагменты віду `пачат: dd.mm.yyyy у hh:mm:ss` -> `{DtTm}`
+- серверных выклікаў `SCALL` з групаваннем па інтэрфейсе, імені аб'екта, метадзе, кантэксце, карыстальніку, базе і працэсе;
+- web-падзей `VRSREQUEST`, `VRSRESPONSE`, `VRSCACHE`: нармалізаваны URI, статус, байты, cache hit/miss і абмежаваныя павольныя/памылковыя прыклады;
+- яўных жыццевых цыклаў `SESN`/`CONN`, актыўнасці `PROC`/`SCOM` і толькі яўна распазнаных сувязей працэсаў;
+- ліцэнзій `LIC`/`HASP`, кантэксту памылак `EXCPCNTX` для сумяшчальных `EXCP`/`QERR` і пашыранай статыстыкі файлавай базы `DBV8DBEng`.
+
+Карэляцыя наўмысна кансерватыўная: VRS-адказ або cache-падзея звязваецца толькі пры адзіным кандыдаце на сумяшчальным lane з узгодненымі ідэнтыфікатарамі; `EXCPCNTX` узбагачае толькі бліжэйшую сумяшчальную памылку. Неадназначныя запісы не звязваюцца па здагадцы і трапляюць у лічыльнікі якасці. Чакаючыя сувязі і прыклады для расследавання абмежаваны па памяці.
+
+Новыя раздзелы даступныя ў `summary.txt`, асобных CSV (`scall.csv`, `web.csv`, `sessions.csv`, `processes.csv`, `licenses.csv`, `filedb.csv`, `error_contexts.csv`), `run.json` і адпаведных абмежаваных HTML-панэлях. Значэнні query у URI і ID-падобныя сегменты шляху нармалізуюцца; шляхі ліцэнзій, серыйныя значэнні, MAC-адрасы і абсалютныя шляхі файлавай базы рэдагуюцца ў адпаведных раздзелах.
+
+Рэкамендацыі па зборы даных для расследавання тэхналагічных праблем: [афіцыйная старонка ІТС 1С](https://its.1c.ru/db/metod8dev/content/6005/hdoc).
+
+## Параўнанне перыядаў
+
+```powershell
+./techlog-stat.exe compare `
+  --baseline C:/reports/before/run.json `
+  --current C:/reports/after/run.json `
+  --output C:/reports/compare `
+  --threshold-pct 5 --threshold-abs-us 1000 `
+  --format text,csv,json,html
+```
+
+Каманда параўноўвае totals, тыпы падзей, карыстальнікаў, базы, працэсы і SQL fingerprints, а таксама SCALL `ByCall`, web requests, SESN/CONN `ByEvent`, `PROCByProcess`, `SCOMByOperation`, `LIC`, `DBV8DBEng` `ByFunc` і групы `EXCPCNTX`. Групы EXCPCNTX параўноўваюцца толькі па count і не ствараюць класіфікацыю рэгрэсіі прадукцыйнасці.
+
+## Ранейшыя рэжымы
+
+Aggregate-рэжым спецыялізаваных справаздач стварае `summary.txt`, CSV, `run.json` і `errors.log`. Рэжым `--mode raw` захоўвае top N асобных падзей кожнай гадзіны ў `raw.txt`, `raw.csv` і `raw.json`.
+
+Падтрымліваюцца фарматы `text`, `csv`, `json`, `html`.
+
+## Абмежаванні
+
+- Імя файла журнала павінна пачынацца з `YYMMDDHH`.
+- `--filter key=value` выкарыстоўвае дакладнае радковае супадзенне; паўторныя фільтры аб'ядноўваюцца праз AND.
+- SQL fingerprinting замяняе літэралы, але не з'яўляецца паўнавартасным SQL parser.
+- Карэляцыя трас пры адсутнасці ідэнтыфікатараў мае эўрыстычны характар.
+- Утыліта аналізуе даступныя файлы пакетна і не з'яўляецца фонавай сістэмай маніторынгу.
