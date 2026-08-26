@@ -9,11 +9,17 @@ on:
       - "v*"
   pull_request:
     paths:
-      - "go/techlog-stat/**"
+      - "cmd/**"
+      - "docs/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "README.md"
+      - "LICENSE"
       - ".github/workflows/build-techlog-stat.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -22,7 +28,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: go/techlog-stat
     strategy:
       fail-fast: false
       matrix:
@@ -47,7 +52,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go/techlog-stat/go.mod
+          go-version-file: go.mod
           cache: false
 
       - name: Build binary
@@ -65,7 +70,7 @@ jobs:
           cp "dist/${{ matrix.binary_name }}" "${{ matrix.package_dir }}/"
           cp README.md "${{ matrix.package_dir }}/"
           cp LICENSE "${{ matrix.package_dir }}/"
-          cp docs/techlog-stat-v1.md "${{ matrix.package_dir }}/"
+          cp docs/techlog-stat-v2.md "${{ matrix.package_dir }}/"
 
       - name: Create Linux archive
         if: matrix.goos == 'linux'
